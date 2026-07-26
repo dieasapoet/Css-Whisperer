@@ -1,0 +1,7 @@
+# 测试/参考素材，不进发布仓库
+*.json
+!manifest.json
+# 系统/编辑器
+.DS_Store
+Thumbs.db
+node_modules/
