@@ -247,18 +247,36 @@ function bindPanelDrag() {
   };
   bar.addEventListener('pointerup', end);
   bar.addEventListener('pointercancel', end);
+
+  // #11 兜底：双击工具栏空白处复位（按钮/下拉上的双击不触发）
+  bar.addEventListener('dblclick', (e) => {
+    if (e.target.closest('.cssw-tb, .cssw-skin-select')) return;
+    resetPanelPos();
+  });
 }
 
 // 切成显式定位并夹在视口内
 function setPanelPos(left, top) {
   const w = panelEl.offsetWidth, h = panelEl.offsetHeight;
   const maxL = Math.max(0, window.innerWidth - w);
-  const maxT = Math.max(0, window.innerHeight - Math.min(h, window.innerHeight * 0.9));
+  // 顶部下限留出安全边距：避免面板被拖到 ST 顶栏下、工具栏(拖动手柄)被顶栏盖住而拖不动(#11)
+  const minT = 8;
+  const maxT = Math.max(minT, window.innerHeight - Math.min(h, window.innerHeight * 0.9));
   left = Math.max(0, Math.min(maxL, left));
-  top = Math.max(0, Math.min(maxT, top));
+  top = Math.max(minT, Math.min(maxT, top));
   panelEl.classList.add('cssw-moved');
   panelEl.style.left = left + 'px';
   panelEl.style.top = top + 'px';
+}
+
+// #11 兜底：双击工具栏空白处，把面板复位到默认居中位置——任何情况下都能救回
+function resetPanelPos() {
+  panelEl.classList.remove('cssw-moved');
+  panelEl.style.left = '';
+  panelEl.style.top = '';
+  panelEl.style.width = '';
+  try { localStorage.removeItem(PANEL_RECT_KEY); } catch (_) {}
+  showToast('面板已复位');
 }
 
 function bindPanelResizePersist() {
@@ -370,9 +388,12 @@ async function renderEditor() {
       <input type="text" class="cssw-editor-search" placeholder="搜索定位（回车跳下一个，Shift+回车上一个）" />
       <button type="button" class="cssw-editor-prev" title="上一个">▲</button>
       <button type="button" class="cssw-editor-next" title="下一个">▼</button>
+      <button type="button" class="cssw-editor-top" title="回到顶部">⤒</button>
+      <button type="button" class="cssw-editor-bottom" title="到达底部">⤓</button>
       <span class="cssw-editor-count">0/0</span>
     </div>
     <div class="cssw-editor-actions">
+      <button type="button" class="cssw-editor-save">💾 保存</button>
       <button type="button" class="cssw-editor-undo">↶ 撤回</button>
       <button type="button" class="cssw-editor-redo">↷ 重做</button>
       <button type="button" class="cssw-editor-reset">⟲ 重置</button>
@@ -387,7 +408,10 @@ async function renderEditor() {
   const searchBox = step.querySelector('.cssw-editor-search');
   const prevBtn = step.querySelector('.cssw-editor-prev');
   const nextBtn = step.querySelector('.cssw-editor-next');
+  const topBtn = step.querySelector('.cssw-editor-top');
+  const bottomBtn = step.querySelector('.cssw-editor-bottom');
   const countEl = step.querySelector('.cssw-editor-count');
+  const saveBtn = step.querySelector('.cssw-editor-save');
   const undoBtn = step.querySelector('.cssw-editor-undo');
   const redoBtn = step.querySelector('.cssw-editor-redo');
   const resetBtn = step.querySelector('.cssw-editor-reset');
@@ -431,6 +455,27 @@ async function renderEditor() {
     undoStack.push(ta.value); redoStack.length = 0;
     ta.value = openBackup; lastSnapshot = openBackup; writeNativeCSS(openBackup);
     refreshCount(); showToast('已恢复到打开编辑器时');
+  });
+
+  // #6 显式保存：立即写回 #customCSS（本已自动保存，但给用户可确认的手段）
+  saveBtn.addEventListener('click', () => {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    undoStack.push(lastSnapshot); redoStack.length = 0; lastSnapshot = ta.value;
+    writeNativeCSS(ta.value);
+    const orig = saveBtn.textContent;
+    saveBtn.textContent = '✓ 已保存';
+    saveBtn.classList.add('cssw-saved');
+    setTimeout(() => { saveBtn.textContent = orig; saveBtn.classList.remove('cssw-saved'); }, 1500);
+    showToast('已保存到自定义CSS');
+  });
+
+  // #4 回顶 / 到底：长代码时不用一直滑（到底还把光标移到末尾，方便在底部粘贴覆盖）
+  topBtn.addEventListener('click', () => { ta.focus(); ta.setSelectionRange(0, 0); ta.scrollTop = 0; });
+  bottomBtn.addEventListener('click', () => {
+    ta.focus();
+    const end = ta.value.length;
+    ta.setSelectionRange(end, end);
+    ta.scrollTop = ta.scrollHeight;
   });
 
   // ---- 搜索：子串匹配，setSelectionRange 选中并滚动（无叠层→不抖，这是当初抖动的正解）----
@@ -730,11 +775,31 @@ function renderResult(text) {
     <div class="cssw-q">复制发给 AI（ChatGPT / Claude 等）</div>
     <textarea class="cssw-result-text" readonly></textarea>
     <button type="button" class="cssw-copy-btn">📋 一键复制</button>
+    <button type="button" class="cssw-restart-btn">🔄 全部清空，重新开始</button>
   `;
   step.hidden = false;
   step.querySelector('.cssw-result-text').value = text;
-  step.querySelector('.cssw-copy-btn').addEventListener('click', () => copyText(text));
+  const copyBtn = step.querySelector('.cssw-copy-btn');
+  copyBtn.addEventListener('click', () => copyText(text, copyBtn));
+  step.querySelector('.cssw-restart-btn').addEventListener('click', restartAll);
   step.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// #7：生成后一键清空所有选择和清单，从头改别处，不用逐个删旧诉求
+function restartAll() {
+  intents = {};
+  extraText = '';
+  cart = [];
+  updateCartBadge();
+  hideStep('.cssw-step-area');
+  hideStep('.cssw-step-what');
+  hideStep('.cssw-step-result');
+  hideStep('.cssw-step-cart');
+  hideFooter();
+  hidePersistentHighlight();
+  const empty = panelEl.querySelector('.cssw-empty');
+  if (empty) { empty.hidden = false; empty.textContent = '已清空。点顶部 🎯 重新选择要改的地方。'; }
+  showToast('已清空所有选择，可以重新开始');
 }
 
 /* ============ 工具 ============ */
@@ -779,18 +844,31 @@ function tagWithNth(el) {
   if (sameTag.length <= 1) return tag;
   return `${tag}:nth-of-type(${sameTag.indexOf(el) + 1})`;
 }
-function copyText(text) {
+function copyText(text, btn) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(() => showToast('已复制，去粘给 AI 吧'), () => fallbackCopy(text));
-  } else { fallbackCopy(text); }
+    navigator.clipboard.writeText(text).then(() => copyFeedback(btn, true), () => fallbackCopy(text, btn));
+  } else { fallbackCopy(text, btn); }
 }
-function fallbackCopy(text) {
+function fallbackCopy(text, btn) {
   try {
     const ta = document.createElement('textarea');
     ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
     document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
-    showToast('已复制，去粘给 AI 吧');
-  } catch (_) { showToast('复制失败，请手动长按选中复制'); }
+    copyFeedback(btn, true);
+  } catch (_) { copyFeedback(btn, false); }
+}
+// #3：复制成功让按钮本身即时变化（移动端 toast 可能不弹/被盖，按钮变色最可靠）
+function copyFeedback(btn, ok) {
+  if (ok) showToast('已复制，去粘给 AI 吧'); else showToast('复制失败，请手动长按选中复制');
+  if (!btn) return;
+  if (btn._restoreTimer) clearTimeout(btn._restoreTimer);
+  if (!btn._origText) btn._origText = btn.textContent;
+  btn.textContent = ok ? '✓ 已复制到剪贴板' : '复制失败，请长按选中';
+  btn.classList.toggle('cssw-copied', ok);
+  btn._restoreTimer = setTimeout(() => {
+    btn.textContent = btn._origText;
+    btn.classList.remove('cssw-copied');
+  }, 1800);
 }
 function hideStep(selector) { const s = panelEl && panelEl.querySelector(selector); if (s) { s.hidden = true; s.innerHTML = ''; } }
 function escapeHtml(str) {
