@@ -38,9 +38,14 @@ const PROP_GROUPS = {
     'position', 'top', 'right', 'bottom', 'left',
     'display', 'flex', 'justify-content', 'align-items', 'gap', 'text-align',
   ],
+  // 文字/文案：改界面上显示的字（含伪元素 content 画的假文字，如输入框占位文字）
+  text: [
+    'content', 'color', 'font-size', 'font-weight', 'font-family',
+    'letter-spacing', 'text-align', 'line-height', 'text-shadow',
+  ],
   // 自定义/兜底：不过滤，给一组常见的
   custom: [
-    'color', 'background', 'background-color', 'font-size', 'border-radius',
+    'content', 'color', 'background', 'background-color', 'font-size', 'border-radius',
     'padding', 'margin', 'width', 'height', 'border', 'box-shadow', 'opacity',
   ],
 };
@@ -87,30 +92,60 @@ function analyze(el, whatKey) {
   const sourceRank = { '你的自定义CSS': 0, '主题内联样式': 1, 'ST内置样式': 2, '样式表': 3 };
   result.relevantRules.sort((a, b) => (sourceRank[a.source] ?? 9) - (sourceRank[b.source] ?? 9));
 
-  // authoredHere：有没有来自"自定义CSS/主题内联"的规则声明了目标属性
+  // authoredHere：有没有来自"自定义CSS/主题内联"的规则声明了目标属性；
+  // 或者检测到伪元素画了内容（假文字/装饰）——那也是作者设计了这里，只是用伪元素。
   result.authoredHere = result.relevantRules.some(
     (r) => r.source === '你的自定义CSS' || r.source === '主题内联样式'
   );
 
-  // 4. 伪元素分析（气泡尾巴、装饰线等——最痛场景）
-  ['::before', '::after'].forEach((pseudo) => {
-    try {
-      const ps = window.getComputedStyle(el, pseudo);
-      const content = ps.getPropertyValue('content');
-      // content 为 none/normal/空 → 该伪元素没被生成，跳过
-      if (!content || content === 'none' || content === 'normal') return;
-      const styles = {};
-      for (const prop of props.concat(['content'])) {
-        const v = ps.getPropertyValue(prop);
-        if (v && v.trim() && v !== 'normal' && v !== 'none' && v !== 'auto') {
-          styles[prop] = v.trim();
+  // 4. 伪元素分析
+  //    - 读元素自身的 ::before/::after/::placeholder（气泡尾巴、装饰、占位文字）
+  //    - 关键：向上追溯父级 1-2 层的 ::before/::after —— 很多主题在父/兄容器上用伪元素
+  //      画假文字/装饰（如 #nonQRFormItems::after 盖住输入框占位文字），
+  //      用户点的是子元素，不追溯就永远读不到。
+  const pseudoTargets = [{ el, depth: 0 }];
+  let parent = el.parentElement;
+  for (let d = 1; d <= 2 && parent && parent !== document.body; d++) {
+    pseudoTargets.push({ el: parent, depth: d });
+    parent = parent.parentElement;
+  }
+  pseudoTargets.forEach(({ el: target, depth }) => {
+    // ::placeholder 只对表单元素(input/textarea)有意义；父级容器一律不读它（纯噪音）
+    const tag = target.tagName ? target.tagName.toLowerCase() : '';
+    const canPlaceholder = depth === 0 && (tag === 'input' || tag === 'textarea');
+    const pseudos = canPlaceholder ? ['::before', '::after', '::placeholder'] : ['::before', '::after'];
+    pseudos.forEach((pseudo) => {
+      try {
+        const ps = window.getComputedStyle(target, pseudo);
+        const content = ps.getPropertyValue('content');
+        const isPlaceholder = pseudo === '::placeholder';
+        // ::before/::after 没 content 就没生成，跳过
+        if (!isPlaceholder && (!content || content === 'none' || content === 'normal')) return;
+        const styles = {};
+        for (const prop of props.concat(['content'])) {
+          const v = ps.getPropertyValue(prop);
+          if (v && v.trim() && v !== 'normal' && v !== 'none' && v !== 'auto') {
+            styles[prop] = v.trim();
+          }
         }
-      }
-      if (Object.keys(styles).length) {
-        result.pseudo.push({ pseudo, styles });
-      }
-    } catch (_) {}
+        // ::placeholder 噪音过滤：只有当它真的可见（颜色不透明）时才保留，
+        // 否则那是主题故意隐藏原生占位符的空壳（如 color:transparent），列出来只添乱。
+        if (isPlaceholder) {
+          const col = styles['color'] || '';
+          const invisible = /rgba?\([^)]*,\s*0\s*\)/.test(col) || styles['opacity'] === '0';
+          if (invisible || !styles['color']) return;
+        }
+        if (Object.keys(styles).length) {
+          const label = depth === 0 ? pseudo : `父级(第${depth}层)${pseudo}`;
+          const sel = depth === 0 ? pseudo : pseudoSelectorHint(target) + pseudo;
+          result.pseudo.push({ pseudo: label, selectorHint: sel, styles });
+        }
+      } catch (_) {}
+    });
   });
+
+  // 伪元素若画了内容（假文字/装饰），也视为"作者设计了这里"
+  if (result.pseudo.length) result.authoredHere = true;
 
   // 5. 解析变量当前值（在元素作用域下取）
   if (computed) {
@@ -229,6 +264,20 @@ function parseVarRef(raw) {
   const idx = raw.indexOf('||');
   if (idx >= 0) return { name: raw.slice(0, idx), fallback: raw.slice(idx + 2) || null };
   return { name: raw, fallback: null };
+}
+
+/**
+ * 给父级元素一个简短选择器提示（#id 或 .首个class），供 AI 定位伪元素来自哪
+ */
+function pseudoSelectorHint(el) {
+  if (!el) return '';
+  if (el.id) return '#' + el.id;
+  try {
+    for (const c of el.classList) {
+      if (!c.startsWith('cssw-')) return '.' + c;
+    }
+  } catch (_) {}
+  return el.tagName ? el.tagName.toLowerCase() : '';
 }
 
 /**

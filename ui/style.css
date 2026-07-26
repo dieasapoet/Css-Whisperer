@@ -406,11 +406,12 @@
 /* ========================================
  * 拾取状态条
  * ======================================== */
-/* 定位：不用 transform:translateX(-50%)——ST 给 <html> 加了 transform，
- * 会让 translate 百分比算错、文字被挤成竖排。改用 left/right+margin auto 居中。 */
+/* 定位：放屏幕底部（输入栏上方），不盖顶栏——顶栏常是用户要去点选的目标。
+ * 不用 transform:translateX(-50%)——ST 给 <html> 加了 transform，会让 translate 百分比算错、文字竖排。 */
 .cssw-status-bar {
   position: fixed;
-  top: 10px;
+  bottom: 12px;
+  top: auto;
   left: 8px;
   right: 8px;
   margin: 0 auto;

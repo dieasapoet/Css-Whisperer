@@ -16,6 +16,7 @@ const WHAT_OPTIONS = [
   { key: 'color', label: '颜色' },
   { key: 'size', label: '大小' },
   { key: 'position', label: '位置' },
+  { key: 'text', label: '文字' },
   { key: 'custom', label: '自定义' },
 ];
 
@@ -38,6 +39,12 @@ const HOW_OPTIONS = {
     { key: 'move', label: '移动位置' },
     { key: 'center', label: '居中' },
     { key: 'spacing', label: '调整间距' },
+    { key: 'custom', label: '自己描述' },
+  ],
+  text: [
+    { key: 'change-text', label: '改成别的字' },
+    { key: 'bigger-text', label: '字变大' },
+    { key: 'text-color', label: '改字的颜色' },
     { key: 'custom', label: '自己描述' },
   ],
   custom: [
@@ -75,12 +82,14 @@ function buildPrompt(p) {
       lines.push(r.cssText);
     });
 
-    // 伪元素（气泡尾巴/装饰线等）
+    // 伪元素（气泡尾巴/装饰线/假文字等，可能在父容器上）
     if (analysis.pseudo && analysis.pseudo.length) {
       lines.push('');
-      lines.push('/* 这个位置还用了伪元素画东西（尾巴/装饰/图标等），当前样式： */');
+      lines.push('/* 这个位置还用了伪元素画东西（尾巴/装饰/假文字等）。');
+      lines.push('   注意：界面上有些"文字"其实是伪元素 content 画上去的，改它要改 content： */');
       analysis.pseudo.forEach((ps) => {
-        lines.push(`/* ${ps.pseudo} */`);
+        const hint = ps.selectorHint ? ` 选择器约为 ${ps.selectorHint}` : '';
+        lines.push(`/* ${ps.pseudo}${hint} */`);
         Object.entries(ps.styles).forEach(([k, v]) => lines.push(`  ${k}: ${v};`));
       });
     }
@@ -144,7 +153,8 @@ function elementLocatorText(analysis, locator) {
   }
   if (analysis && analysis.pseudo && analysis.pseudo.length) {
     analysis.pseudo.forEach((ps) => {
-      out.push(`伪元素 ${ps.pseudo}：`);
+      const hint = ps.selectorHint ? `（${ps.selectorHint}）` : '';
+      out.push(`伪元素 ${ps.pseudo}${hint}：`);
       Object.entries(ps.styles).forEach(([k, v]) => out.push(`  ${k}: ${v};`));
     });
   }
