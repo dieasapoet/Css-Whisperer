@@ -17,6 +17,8 @@ const WHAT_OPTIONS = [
   { key: 'size', label: '大小' },
   { key: 'position', label: '位置' },
   { key: 'text', label: '文字' },
+  { key: 'font', label: '字体' },
+  { key: 'icon', label: '图标/图案' },
   { key: 'custom', label: '自定义' },
 ];
 
@@ -47,6 +49,18 @@ const HOW_OPTIONS = {
     { key: 'text-color', label: '改字的颜色' },
     { key: 'custom', label: '自己描述' },
   ],
+  // 字体：二级选项就是"改全局 / 只改这里"——复用现有选项行，不加新模块
+  font: [
+    { key: 'font-global', label: '换字体（全站）' },
+    { key: 'font-local', label: '只换这里的字体' },
+    { key: 'custom', label: '自己描述' },
+  ],
+  icon: [
+    { key: 'change-icon', label: '换个图标' },
+    { key: 'change-image', label: '换成图片' },
+    { key: 'icon-color', label: '改图标颜色' },
+    { key: 'custom', label: '自己描述' },
+  ],
   custom: [
     { key: 'custom', label: '自己描述' },
   ],
@@ -56,33 +70,93 @@ function getHowOptions(whatKey) {
   return HOW_OPTIONS[whatKey] || HOW_OPTIONS.custom;
 }
 
-function describeIntent(whatLabel, howLabel, customText) {
-  if (customText && customText.trim()) return customText.trim();
-  return `把它的【${whatLabel}】改得【${howLabel}】`;
+/**
+ * 生成给 AI 的提问文字
+ * @param {Object} p
+ * @param {string} p.areaName
+ * @param {Array<{whatKey,whatLabel,howKey,howLabel}>} p.intents - 用户勾选的多个诉求
+ * @param {string} p.customText - 额外自由描述（可空）
+ * @param {Object} p.analysis
+ * @param {Object} p.locator
+ */
+function buildPrompt(p) {
+  const lines = [];
+  lines.push('我在改一个 SillyTavern 的美化主题。');
+  lines.push(...regionBlock(p, false));
+  lines.push(pushHint({ intents: p.intents }));
+  return lines.join('\n');
 }
 
 /**
- * 生成给 AI 的提问文字
+ * 购物车模式：一次生成多个区域的诉求
+ * @param {Array} items - 每项 { areaName, intents, customText, analysis, locator }
  */
-function buildPrompt(p) {
-  const { areaName, whatLabel, howLabel, customText, analysis } = p;
-  const intent = describeIntent(whatLabel, howLabel, customText);
+function buildMultiPrompt(items) {
+  const list = (items || []).filter(Boolean);
+  if (!list.length) return '';
+  if (list.length === 1) return buildPrompt(list[0]);
 
   const lines = [];
-  lines.push('我在改一个 SillyTavern 的美化主题。');
-  lines.push(`我想给【${areaName}】做这个调整：${intent}。`);
+  lines.push('我在改一个 SillyTavern 的美化主题，想一次改好几个地方。');
+  lines.push('');
+  list.forEach((p, i) => {
+    lines.push(`【第 ${i + 1} 处】`);
+    lines.push(...regionBlock(p, true));
+    lines.push('');
+  });
+  // 汇总所有诉求涉及的属性，决定收尾提示
+  const allIntents = list.flatMap((p) => p.intents || []);
+  lines.push(pushHint({ intents: allIntents }));
+  return lines.join('\n');
+}
+
+/**
+ * 生成"单个区域"的正文段落（不含总开头、不含收尾要求）
+ * @param {Object} p
+ * @param {boolean} multi - 是否处于多区域模式（措辞略不同）
+ * @returns {string[]}
+ */
+function regionBlock(p, multi) {
+  const { areaName, analysis } = p;
+  const intents = p.intents && p.intents.length ? p.intents : [{ whatKey: 'custom', whatLabel: '样式', howLabel: '（见下方描述）' }];
+  const whatKeys = intents.map((it) => it.whatKey);
+  const lines = [];
+
+  // 诉求
+  if (intents.length === 1 && !p.customText) {
+    lines.push(`${multi ? '' : '我想'}给【${areaName}】做这个调整：把它的【${intents[0].whatLabel}】改得【${intents[0].howLabel}】。`);
+  } else {
+    lines.push(`${multi ? '' : '我想'}给【${areaName}】做这几个调整：`);
+    intents.forEach((it) => lines.push(`- ${it.whatLabel}：${it.howLabel}`));
+    if (p.customText && p.customText.trim()) lines.push(`- 另外：${p.customText.trim()}`);
+  }
+  if (intents.length === 1 && p.customText && p.customText.trim()) {
+    lines.push(`补充：${p.customText.trim()}`);
+  }
+
+  // 字体全局/局部说明
+  if (whatKeys.includes('font')) {
+    const fontIntent = intents.find((it) => it.whatKey === 'font');
+    if (fontIntent && fontIntent.howKey === 'font-global') {
+      lines.push('（字体这项我要换整个界面的。字体一般是全局变量控制的，请告诉我改哪个全局设置能全站生效。）');
+    } else if (fontIntent && fontIntent.howKey === 'font-local') {
+      lines.push('（字体这项我只想改这一处，别影响别处。）');
+    } else if (analysis && analysis.fontIsGlobalVar) {
+      lines.push('（注意：这里字体看起来是全局变量控制的，改它可能影响整个界面。请说明是改全局还是只改这一处。）');
+    }
+  }
+  if (whatKeys.includes('icon')) {
+    lines.push('（图标这项：它可能是伪元素 content 画的图标码或背景图，请告诉我怎么换成别的图标或图片。）');
+  }
   lines.push('');
 
   if (analysis && analysis.authoredHere) {
-    // ===== 情形 A：作者/自定义CSS 写了这里 =====
     lines.push('影响这个位置的 CSS 代码是（已挑出和这次调整相关的规则）：');
     lines.push('```css');
     analysis.relevantRules.slice(0, 6).forEach((r) => {
       lines.push(`/* 来自：${r.source} */`);
       lines.push(r.cssText);
     });
-
-    // 伪元素（气泡尾巴/装饰线/假文字等，可能在父容器上）
     if (analysis.pseudo && analysis.pseudo.length) {
       lines.push('');
       lines.push('/* 这个位置还用了伪元素画东西（尾巴/装饰/假文字等）。');
@@ -93,8 +167,6 @@ function buildPrompt(p) {
         Object.entries(ps.styles).forEach(([k, v]) => lines.push(`  ${k}: ${v};`));
       });
     }
-
-    // 相关变量
     if (analysis.variables && analysis.variables.length) {
       lines.push('');
       lines.push('/* 相关 CSS 变量的当前值： */');
@@ -104,34 +176,24 @@ function buildPrompt(p) {
       });
     }
     lines.push('```');
-    if (analysis.partialUnreadable) {
-      lines.push('（注：部分外部样式表读不到，以上可能不完整。）');
-    }
+    if (analysis.partialUnreadable) lines.push('（注：部分外部样式表读不到，以上可能不完整。）');
     lines.push('');
     lines.push('请给我三种做法：');
     lines.push('① 改数值：告诉我上面哪一行、把哪个数字改成多少；');
     lines.push('② 整段替换：把原来那段和替换后的完整代码都给我；');
     lines.push('③ 覆盖：给我一段能加进「自定义CSS」的代码。');
-    lines.push(pushHint(p));
   } else {
-    // ===== 情形 B：作者没针对这里写样式，从零生成 =====
     lines.push('但当前主题好像没有专门针对这里的样式，需要从零加。');
-    if (analysis && analysis.pseudo && analysis.pseudo.length) {
-      lines.push('（注意：这个位置有伪元素，见下方。）');
-    }
+    if (analysis && analysis.pseudo && analysis.pseudo.length) lines.push('（注意：这个位置有伪元素，见下方。）');
     lines.push('这个元素的定位信息是：');
     lines.push('```');
     lines.push(elementLocatorText(analysis, p.locator));
     lines.push('```');
-    if (analysis && analysis.partialUnreadable) {
-      lines.push('（注：部分外部样式表读不到，可能有我没找到的规则。）');
-    }
+    if (analysis && analysis.partialUnreadable) lines.push('（注：部分外部样式表读不到，可能有我没找到的规则。）');
     lines.push('');
     lines.push('请给我一段全新的 CSS，加进 SillyTavern 的「自定义CSS」框里就能生效。');
-    lines.push(pushHint(p));
   }
-
-  return lines.join('\n');
+  return lines;
 }
 
 /**
@@ -139,11 +201,12 @@ function buildPrompt(p) {
  * 数值方向要求只在"大小/位置"类调整时加（改数值方向对小白最容易懵）。
  */
 function pushHint(p) {
+  const whatKeys = (p.intents && p.intents.length ? p.intents.map((it) => it.whatKey) : [p.whatKey]).filter(Boolean);
   const parts = [];
   parts.push('');
   parts.push('几个要求：');
   parts.push('- 用简单的大白话讲，别太长，别堆术语，我是新手；');
-  if (p.whatKey === 'size' || p.whatKey === 'position') {
+  if (whatKeys.includes('size') || whatKeys.includes('position')) {
     parts.push('- 凡是要我改数字的，告诉我「改大是往哪边/变什么，改小是往哪边/变什么」，比如“这个数字越大字越大”“上边距越大越往下”；');
   }
   parts.push('- 我会在「自定义CSS」框里用搜索找到要改的地方。请给我一小段独一无二的原文片段当搜索词（比如一整句 `background-color: var(--xxx)`），别只给类名——类名会搜到一大堆，我找不准。搜索词越短越好，但要能精确定位；');
@@ -173,4 +236,4 @@ function elementLocatorText(analysis, locator) {
   return out.join('\n') || '（无法获取定位信息）';
 }
 
-export { WHAT_OPTIONS, getHowOptions, buildPrompt };
+export { WHAT_OPTIONS, getHowOptions, buildPrompt, buildMultiPrompt };

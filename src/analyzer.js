@@ -43,6 +43,15 @@ const PROP_GROUPS = {
     'content', 'color', 'font-size', 'font-weight', 'font-family',
     'letter-spacing', 'text-align', 'line-height', 'text-shadow',
   ],
+  // 字体：字型（多为全局变量控制）
+  font: [
+    'font-family', 'font-size', 'font-weight', 'letter-spacing', 'line-height',
+  ],
+  // 图标/图案：换图标(多为伪元素 content)、换背景图
+  icon: [
+    'content', 'background', 'background-image', 'background-color',
+    'color', 'fill', 'stroke', 'mask', '-webkit-mask',
+  ],
   // 自定义/兜底：不过滤，给一组常见的
   custom: [
     'content', 'color', 'background', 'background-color', 'font-size', 'border-radius',
@@ -51,6 +60,12 @@ const PROP_GROUPS = {
 };
 
 function getPropGroup(whatKey) {
+  // 支持传入单个 key 或 key 数组（多选时取属性组并集）
+  if (Array.isArray(whatKey)) {
+    const set = new Set();
+    whatKey.forEach((k) => (PROP_GROUPS[k] || PROP_GROUPS.custom).forEach((p) => set.add(p)));
+    return set.size ? Array.from(set) : PROP_GROUPS.custom;
+  }
   return PROP_GROUPS[whatKey] || PROP_GROUPS.custom;
 }
 
@@ -70,6 +85,7 @@ function analyze(el, whatKey) {
     variables: [],
     computed: {},
     authoredHere: false, // 主题/自定义CSS 是否声明了这组属性
+    fontIsGlobalVar: false, // 字体是否由全局 CSS 变量控制（改它会影响全站）
     partialUnreadable: false,
   };
   if (!el || el.nodeType !== Node.ELEMENT_NODE) return result;
@@ -83,6 +99,26 @@ function analyze(el, whatKey) {
       if (v && v.trim()) result.computed[prop] = v.trim();
     }
   } catch (_) {}
+
+  // 字体全局检测：font-family 若解析到 var(--xxx)，且该变量定义在 :root，
+  // 说明字体是全局变量控制的，改它会影响整个界面。
+  const wantsFont = whatKey === 'font' || whatKey === 'text'
+    || (Array.isArray(whatKey) && (whatKey.includes('font') || whatKey.includes('text')));
+  if (wantsFont && computed) {
+    try {
+      // 从命中规则的 cssText 里看 font-family 是否写成 var(...)
+      // 这里先粗判：若 :root 上定义了任意 --*font* 变量且元素字体等于它，视为全局
+      const rootStyle = window.getComputedStyle(document.documentElement);
+      const bodyFont = window.getComputedStyle(document.body).getPropertyValue('font-family').trim();
+      const elFont = computed.getPropertyValue('font-family').trim();
+      // 元素字体和 body 一致 → 大概率继承自全局
+      if (elFont && elFont === bodyFont) result.fontIsGlobalVar = true;
+      // :root 上有字体变量也标记
+      for (const name of ['--main-font', '--font-main', '--mainFontFamily', '--fontFamily']) {
+        if (rootStyle.getPropertyValue(name).trim()) { result.fontIsGlobalVar = true; break; }
+      }
+    } catch (_) {}
+  }
 
   // 2. 遍历样式表，收集命中该元素、且声明了目标属性的规则
   const varNames = new Set();
