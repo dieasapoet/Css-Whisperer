@@ -20,6 +20,7 @@ import { identify } from '../src/semantic.js';
 import { analyze } from '../src/analyzer.js';
 import { WHAT_OPTIONS, getHowOptions, buildPrompt, buildMultiPrompt } from '../src/prompt-builder.js';
 import { readNativeCSS, writeNativeCSS, nativeExists, searchInTextarea } from '../src/editor.js';
+import { createEditor } from '../src/editor-cm.js';
 
 const PANEL_ID = 'cssw-panel';
 const ORB_ID = 'cssw-orb';
@@ -78,6 +79,8 @@ function ensureOrb() {
   orbEl.addEventListener('pointercancel', () => { orbGesture = null; });
   orbEl.addEventListener('click', (e) => e.stopPropagation());
   orbEl.addEventListener('mousedown', (e) => e.stopPropagation());
+  orbEl.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+  orbEl.addEventListener('pointerdown', (e) => e.stopPropagation());
   return orbEl;
 }
 function onOrbPointerDown(e) {
@@ -178,6 +181,8 @@ function bindShellEvents() {
   // 防抽屉收起
   panelEl.addEventListener('click', (e) => e.stopPropagation());
   panelEl.addEventListener('mousedown', (e) => e.stopPropagation());
+  panelEl.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+  panelEl.addEventListener('pointerdown', (e) => e.stopPropagation());
 }
 
 /* ============ 两态切换 ============ */
@@ -243,133 +248,94 @@ function toggleEditor() {
   editorOpen = true;
 }
 
-function renderEditor() {
+async function renderEditor() {
   const step = panelEl.querySelector('.cssw-step-editor');
   step.innerHTML = `
     <div class="cssw-editor-searchrow">
-      <input type="text" class="cssw-editor-search" placeholder="搜索定位" />
-      <button type="button" class="cssw-editor-prev" title="上一个">▲</button>
+      <input type="text" class="cssw-editor-search" placeholder="搜索定位（回车跳下一个）" />
       <button type="button" class="cssw-editor-next" title="下一个">▼</button>
       <span class="cssw-editor-count">0/0</span>
     </div>
     <div class="cssw-editor-actions">
-      <button type="button" class="cssw-editor-undo" disabled>↶ 撤回</button>
-      <button type="button" class="cssw-editor-reset">⟲ 重置（恢复打开时）</button>
+      <button type="button" class="cssw-editor-undo">↶ 撤回</button>
+      <button type="button" class="cssw-editor-redo">↷ 重做</button>
+      <button type="button" class="cssw-editor-reset">⟲ 重置</button>
     </div>
-    <div class="cssw-editor-wrap">
-      <div class="cssw-editor-highlight" aria-hidden="true"></div>
-      <textarea class="cssw-editor-textarea" spellcheck="false"></textarea>
-    </div>
+    <div class="cssw-editor-host"></div>
+    <div class="cssw-editor-loading">正在加载编辑器…</div>
   `;
   step.hidden = false;
 
-  const ta = step.querySelector('.cssw-editor-textarea');
-  const hl = step.querySelector('.cssw-editor-highlight');
+  const host = step.querySelector('.cssw-editor-host');
+  const loading = step.querySelector('.cssw-editor-loading');
   const searchBox = step.querySelector('.cssw-editor-search');
-  const prevBtn = step.querySelector('.cssw-editor-prev');
   const nextBtn = step.querySelector('.cssw-editor-next');
   const countEl = step.querySelector('.cssw-editor-count');
   const undoBtn = step.querySelector('.cssw-editor-undo');
+  const redoBtn = step.querySelector('.cssw-editor-redo');
   const resetBtn = step.querySelector('.cssw-editor-reset');
 
-  ta.value = readNativeCSS();
-
-  // 撤回/重置：打开时记原始快照；每次写回前把旧值压入 undo 栈
-  const openBackup = ta.value;
-  const undoStack = [];
-  const pushUndo = (v) => { undoStack.push(v); if (undoStack.length > 50) undoStack.shift(); undoBtn.disabled = undoStack.length === 0; };
-
+  const openBackup = readNativeCSS();
   let saveTimer = null;
+  const scheduleSave = (v) => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => writeNativeCSS(v), 400);
+  };
+
+  // 优先 CodeMirror；加载失败回退普通 textarea
+  let ed = null;
+  try { ed = await createEditor(host, openBackup, scheduleSave); } catch (_) { ed = null; }
+
+  if (ed) {
+    loading.remove();
+    ed.refresh();
+    // 搜索：打字只更新计数+高亮，不跳转；回车/点▼才跳下一个
+    const doCount = () => {
+      ed.setKeyword(searchBox.value);
+      const n = ed.count();
+      countEl.textContent = searchBox.value ? `共 ${n}` : '0';
+    };
+    searchBox.addEventListener('input', doCount);
+    searchBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); ed.findNext(); } });
+    nextBtn.addEventListener('click', () => ed.findNext());
+    // 撤回/重做用 CM 原生历史；重置回打开时
+    undoBtn.addEventListener('click', () => { ed.undo(); });
+    redoBtn.addEventListener('click', () => { ed.redo(); });
+    resetBtn.addEventListener('click', () => { ed.setValue(openBackup); writeNativeCSS(openBackup); showToast('已恢复到打开编辑器时'); });
+    return;
+  }
+
+  // ===== 回退：普通 textarea（无 CM 时）=====
+  loading.textContent = '（编辑器需要联网加载，当前用简易模式）';
+  host.innerHTML = '<textarea class="cssw-editor-textarea" spellcheck="false"></textarea>';
+  const ta = host.querySelector('.cssw-editor-textarea');
+  ta.value = openBackup;
+  const undoStack = [];
   let lastSaved = ta.value;
   ta.addEventListener('input', () => {
     if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      pushUndo(lastSaved);       // 存"改动前"的值，撤回时回到它
-      lastSaved = ta.value;
-      writeNativeCSS(ta.value);
-      renderHighlight();
-    }, 400);
-    renderHighlight();
+    saveTimer = setTimeout(() => { undoStack.push(lastSaved); lastSaved = ta.value; writeNativeCSS(ta.value); }, 400);
   });
-
-  undoBtn.addEventListener('click', () => {
-    if (!undoStack.length) return;
-    const prev = undoStack.pop();
-    ta.value = prev;
-    lastSaved = prev;
-    writeNativeCSS(prev);
-    undoBtn.disabled = undoStack.length === 0;
-    recompute();
-    showToast('已撤回一步');
-  });
-  resetBtn.addEventListener('click', () => {
-    pushUndo(lastSaved);
-    ta.value = openBackup;
-    lastSaved = openBackup;
-    writeNativeCSS(openBackup);
-    recompute();
-    showToast('已恢复到打开编辑器时的样子');
-  });
-
-  // ===== 搜索：计数 + 上/下一个 + 全部高亮 =====
-  let matches = [];
-  let cur = -1;
-  const recompute = () => {
-    const kw = searchBox.value;
-    matches = [];
-    if (kw) {
-      let i = ta.value.indexOf(kw, 0);
-      while (i !== -1) { matches.push(i); i = ta.value.indexOf(kw, i + kw.length); }
-    }
-    cur = matches.length ? 0 : -1;
-    updateCount();
-    renderHighlight();
-    if (cur >= 0) jump();
-  };
-  const updateCount = () => { countEl.textContent = matches.length ? `${cur + 1}/${matches.length}` : '0/0'; };
+  undoBtn.addEventListener('click', () => { if (undoStack.length) { const v = undoStack.pop(); ta.value = v; lastSaved = v; writeNativeCSS(v); } });
+  redoBtn.disabled = true;
+  resetBtn.addEventListener('click', () => { ta.value = openBackup; lastSaved = openBackup; writeNativeCSS(openBackup); showToast('已恢复到打开编辑器时'); });
+  // 简易搜索：回车跳转选中（无满屏高亮，避免抖动）
+  let lastIdx = 0;
   const jump = () => {
-    const kw = searchBox.value;
-    const idx = matches[cur];
-    ta.focus();
-    ta.setSelectionRange(idx, idx + kw.length);
-    const before = ta.value.slice(0, idx);
-    const line = before.split('\n').length - 1;
-    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 18;
-    ta.scrollTop = Math.max(0, line * lh - ta.clientHeight / 2);
-    syncHighlightScroll();
+    const kw = searchBox.value; if (!kw) return;
+    let idx = ta.value.indexOf(kw, lastIdx);
+    if (idx === -1) idx = ta.value.indexOf(kw, 0);
+    if (idx === -1) { countEl.textContent = '0'; return; }
+    ta.focus(); ta.setSelectionRange(idx, idx + kw.length);
+    lastIdx = idx + kw.length;
   };
-  const step2 = (d) => {
-    if (!matches.length) return;
-    cur = (cur + d + matches.length) % matches.length;
-    updateCount(); jump();
-  };
-
-  // 高亮层：把匹配词包 <mark>，铺在 textarea 背后（textarea 背景透明）
-  const renderHighlight = () => {
-    const kw = searchBox.value;
-    const text = ta.value;
-    if (!kw) { hl.innerHTML = escapeHtml(text); syncHighlightScroll(); return; }
-    let out = '';
-    let i = 0;
-    while (true) {
-      const j = text.indexOf(kw, i);
-      if (j === -1) { out += escapeHtml(text.slice(i)); break; }
-      out += escapeHtml(text.slice(i, j));
-      out += '<mark class="cssw-hl">' + escapeHtml(kw) + '</mark>';
-      i = j + kw.length;
-    }
-    hl.innerHTML = out;
-    syncHighlightScroll();
-  };
-  const syncHighlightScroll = () => { hl.scrollTop = ta.scrollTop; hl.scrollLeft = ta.scrollLeft; };
-  ta.addEventListener('scroll', syncHighlightScroll);
-
-  searchBox.addEventListener('input', recompute);
-  searchBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); step2(1); } });
-  nextBtn.addEventListener('click', () => step2(1));
-  prevBtn.addEventListener('click', () => step2(-1));
-
-  renderHighlight();
+  searchBox.addEventListener('input', () => {
+    const kw = searchBox.value; let n = 0;
+    if (kw) { let i = ta.value.indexOf(kw, 0); while (i !== -1) { n++; i = ta.value.indexOf(kw, i + kw.length); } }
+    countEl.textContent = kw ? `共 ${n}` : '0'; lastIdx = 0;
+  });
+  searchBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); jump(); } });
+  nextBtn.addEventListener('click', jump);
 }
 
 /* ============ 区域（层级链，直接显示区域名，不要"选大选小") ============ */
@@ -474,7 +440,7 @@ function renderWhat() {
   step.querySelector('.cssw-gen-btn').addEventListener('click', onGenerate);
 }
 
-// 为每个已勾选的"改什么"渲染它的"怎么改"小 chip（单选）
+// 为每个已勾选的"改什么"渲染它的"怎么改"小 chip（单选）；选"自己描述"时给输入框
 function renderHowGroups(container) {
   container.innerHTML = Object.keys(intents).map((key) => {
     const it = intents[key];
@@ -483,7 +449,10 @@ function renderHowGroups(container) {
       const on = it.howKey === o.key ? ' active' : '';
       return `<button type="button" class="cssw-chip cssw-how-chip${on}" data-what="${key}" data-key="${o.key}" data-label="${escapeHtml(o.label)}">${escapeHtml(o.label)}</button>`;
     }).join('');
-    return `<div class="cssw-how-row"><span class="cssw-how-label">${escapeHtml(it.whatLabel)}：</span><div class="cssw-chips cssw-chips-sm">${chips}</div></div>`;
+    const customBox = it.howKey === 'custom'
+      ? `<input type="text" class="cssw-how-custom" data-what="${key}" placeholder="用一句话说你想怎么改" value="${escapeHtml(it.customText || '')}" />`
+      : '';
+    return `<div class="cssw-how-row"><span class="cssw-how-label">${escapeHtml(it.whatLabel)}：</span><div class="cssw-chips cssw-chips-sm">${chips}${customBox ? '<br>' + customBox : ''}</div></div>`;
   }).join('');
 
   container.querySelectorAll('.cssw-how-chip').forEach((btn) => {
@@ -491,9 +460,23 @@ function renderHowGroups(container) {
       const what = btn.getAttribute('data-what');
       intents[what].howKey = btn.getAttribute('data-key');
       intents[what].howLabel = btn.getAttribute('data-label');
-      // 只重渲染 how 区，避免整块闪
       renderHowGroups(container);
+      // 选了"自己描述"→ 自动聚焦输入框
+      if (intents[what].howKey === 'custom') {
+        const inp = container.querySelector(`.cssw-how-custom[data-what="${what}"]`);
+        if (inp) inp.focus();
+      }
     });
+  });
+
+  // 自定义输入框：内容即时存进对应 intent
+  container.querySelectorAll('.cssw-how-custom').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const what = inp.getAttribute('data-what');
+      intents[what].customText = inp.value;
+      intents[what].howLabel = inp.value.trim() || '自己描述';
+    });
+    inp.addEventListener('mousedown', (e) => e.stopPropagation());
   });
 }
 
@@ -602,7 +585,43 @@ function renderResult(text) {
 function buildLocator(el, standardSelector) {
   const classes = [];
   try { el.classList.forEach((c) => { if (!c.startsWith('cssw-')) classes.push(c); }); } catch (_) {}
-  return { tag: el.tagName ? el.tagName.toLowerCase() : '', id: el.id || '', classes: classes.slice(0, 6), standardSelector: standardSelector || '' };
+  return {
+    tag: el.tagName ? el.tagName.toLowerCase() : '',
+    id: el.id || '',
+    classes: classes.slice(0, 6),
+    standardSelector: standardSelector || '',
+    uniqueSelector: buildUniqueSelector(el),  // 尽量唯一的路径，让 AI 只改这一个
+  };
+}
+
+/**
+ * 生成"尽量唯一"的选择器：优先自身 id；否则向上找带 id 的祖先做锚点 + 后代路径。
+ * 目的：避免 AI 拿 .drawer-icon 这类通用类，一改改一整批。
+ */
+function buildUniqueSelector(el) {
+  try {
+    if (!el || el.nodeType !== 1) return '';
+    if (el.id && document.querySelectorAll('#' + CSS.escape(el.id)).length === 1) return '#' + CSS.escape(el.id);
+    // 向上找最近的带唯一 id 的祖先
+    let anchor = el.parentElement;
+    const path = [tagWithNth(el)];
+    while (anchor && anchor !== document.body) {
+      if (anchor.id && document.querySelectorAll('#' + CSS.escape(anchor.id)).length === 1) {
+        return '#' + CSS.escape(anchor.id) + ' ' + path.join(' > ');
+      }
+      path.unshift(tagWithNth(anchor));
+      anchor = anchor.parentElement;
+    }
+    return path.join(' > ');
+  } catch (_) { return ''; }
+}
+function tagWithNth(el) {
+  const tag = el.tagName.toLowerCase();
+  const parent = el.parentElement;
+  if (!parent) return tag;
+  const sameTag = Array.from(parent.children).filter((c) => c.tagName === el.tagName);
+  if (sameTag.length <= 1) return tag;
+  return `${tag}:nth-of-type(${sameTag.indexOf(el) + 1})`;
 }
 function copyText(text) {
   if (navigator.clipboard && navigator.clipboard.writeText) {

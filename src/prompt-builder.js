@@ -157,6 +157,11 @@ function regionBlock(p, multi) {
       lines.push(`/* 来自：${r.source} */`);
       lines.push(r.cssText);
     });
+    if (p.locator && p.locator.uniqueSelector) {
+      lines.push('');
+      lines.push(`/* 我点中的就这一个元素，精确选择器：${p.locator.uniqueSelector}`);
+      lines.push('   如果上面规则用的是通用类（会影响一整批同类），改的时候请改成只针对上面这个精确选择器。 */');
+    }
     if (analysis.pseudo && analysis.pseudo.length) {
       lines.push('');
       lines.push('/* 这个位置还用了伪元素画东西（尾巴/装饰/假文字等）。');
@@ -210,6 +215,7 @@ function pushHint(p) {
     parts.push('- 凡是要我改数字的，告诉我「改大是往哪边/变什么，改小是往哪边/变什么」，比如“这个数字越大字越大”“上边距越大越往下”；');
   }
   parts.push('- 我会在「自定义CSS」框里用搜索找到要改的地方。请给我一小段独一无二的原文片段当搜索词（比如一整句 `background-color: var(--xxx)`），别只给类名——类名会搜到一大堆，我找不准。搜索词越短越好，但要能精确定位；');
+  parts.push('- 重要：我只想改我点中的这一个地方，别动同类的其它元素。请用能精确锁定这一个的选择器（优先用它自己的 id，或"某个祖先 id + 后代"的组合），不要用像 `.drawer-icon`、`.mes_button` 这种一改就改一整批的通用类；');
   parts.push('- 最后把我要粘贴的完整代码单独放一个代码块，让我能一次性整段复制，不用自己拼。');
   return parts.join('\n');
 }
@@ -217,8 +223,9 @@ function pushHint(p) {
 function elementLocatorText(analysis, locator) {
   const out = [];
   if (locator) {
+    if (locator.uniqueSelector) out.push(`精确选择器（就指这一个）：${locator.uniqueSelector}`);
     if (locator.tag) out.push(`标签：${locator.tag}`);
-    if (locator.standardSelector) out.push(`ST标准选择器：${locator.standardSelector}`);
+    if (locator.standardSelector) out.push(`ST标准选择器（注意：可能匹配多个同类）：${locator.standardSelector}`);
     if (locator.id) out.push(`id：#${locator.id}`);
     if (locator.classes && locator.classes.length) out.push(`class：.${locator.classes.join(' .')}`);
   }
