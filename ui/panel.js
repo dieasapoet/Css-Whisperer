@@ -20,6 +20,7 @@ import { enterPickMode, exitPickMode, isPicking, getContainerChain, showToast } 
 import { identify } from '../src/semantic.js';
 import { analyze } from '../src/analyzer.js';
 import { WHAT_OPTIONS, getHowOptions, buildPrompt } from '../src/prompt-builder.js';
+import { readNativeCSS, writeNativeCSS, nativeExists, searchInTextarea } from '../src/editor.js';
 
 const PANEL_ID = 'cssw-panel';
 const ORB_ID = 'cssw-orb';
@@ -200,7 +201,9 @@ function renderShell() {
       <div class="cssw-step cssw-step-pick">
         <button type="button" class="cssw-pick-btn">🎯 点选界面上要改的地方</button>
         <p class="cssw-tip">点按钮后去点任意位置。要改展开面板里的东西（如角色头像），先展开它再点选。</p>
+        <button type="button" class="cssw-editor-btn">✏️ 打开自定义CSS编辑框（搜索 / 粘贴 / 保存）</button>
       </div>
+      <div class="cssw-step cssw-step-editor" hidden></div>
       <div class="cssw-step cssw-step-area" hidden></div>
       <div class="cssw-step cssw-step-what" hidden></div>
       <div class="cssw-step cssw-step-how" hidden></div>
@@ -222,6 +225,7 @@ function bindShellEvents() {
   });
 
   panelEl.querySelector('.cssw-pick-btn').addEventListener('click', onPickClick);
+  panelEl.querySelector('.cssw-editor-btn').addEventListener('click', toggleEditor);
 
   // ★ 防抽屉收起：面板吞掉自己的 click + mousedown
   panelEl.addEventListener('click', (e) => e.stopPropagation());
@@ -306,6 +310,74 @@ function onElementPicked(el) {
   renderWhat();
   hideStep('.cssw-step-how');
   hideStep('.cssw-step-result');
+}
+
+/* ============ CSS 编辑框（搜索 / 粘贴 / 保存） ============ */
+
+let editorOpen = false;
+
+function toggleEditor() {
+  const step = panelEl.querySelector('.cssw-step-editor');
+  if (editorOpen) {
+    step.hidden = true;
+    step.innerHTML = '';
+    editorOpen = false;
+    return;
+  }
+  if (!nativeExists()) {
+    showToast('找不到 SillyTavern 的自定义CSS框，请确认已打开对应设置');
+    return;
+  }
+  renderEditor();
+  editorOpen = true;
+}
+
+function renderEditor() {
+  const step = panelEl.querySelector('.cssw-step-editor');
+  step.innerHTML = `
+    <div class="cssw-q">自定义CSS（和 ST 设置里那个框是同一份，改了立刻保存）</div>
+    <div class="cssw-editor-searchrow">
+      <input type="text" class="cssw-editor-search" placeholder="搜索：粘 AI 给的搜索词，回车定位" />
+      <button type="button" class="cssw-editor-find">查找</button>
+    </div>
+    <textarea class="cssw-editor-textarea" spellcheck="false"></textarea>
+    <div class="cssw-editor-hint">在这里粘 AI 给的代码 → 会自动存进 ST，刷新也在。搜索词找到后会高亮选中。</div>
+  `;
+  step.hidden = false;
+
+  const ta = step.querySelector('.cssw-editor-textarea');
+  const searchBox = step.querySelector('.cssw-editor-search');
+  const findBtn = step.querySelector('.cssw-editor-find');
+
+  // 载入 ST 当前 customCSS
+  ta.value = readNativeCSS();
+
+  // 编辑即实时写回 ST（防抖，避免每键都触发保存）
+  let saveTimer = null;
+  ta.addEventListener('input', () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      writeNativeCSS(ta.value);
+    }, 400);
+  });
+
+  // 搜索：回车 / 点查找 → 定位下一个匹配
+  let lastIdx = 0;
+  const doFind = () => {
+    const kw = searchBox.value;
+    if (!kw) return;
+    const found = searchInTextarea(ta, kw, lastIdx);
+    if (found === -1) {
+      showToast('没找到这段，换个搜索词试试');
+      lastIdx = 0;
+    } else {
+      lastIdx = found + kw.length;
+    }
+  };
+  findBtn.addEventListener('click', doFind);
+  searchBox.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); doFind(); }
+  });
 }
 
 /* ============ 步骤：区域 + 放大/缩小 ============ */
@@ -422,7 +494,7 @@ function onGenerate() {
 
   const locator = buildLocator(el, info.standardSelector);
   const text = buildPrompt({
-    areaName: info.note ? `${info.name}（${info.note}）` : info.name,
+    areaName: info.name,   // 只给专业名；白话注释是给用户看的，不进提问
     whatKey: sel.whatKey,
     whatLabel: sel.whatLabel || '样式',
     howLabel: sel.howLabel || '（见下方描述）',

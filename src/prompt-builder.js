@@ -146,6 +146,7 @@ function pushHint(p) {
   if (p.whatKey === 'size' || p.whatKey === 'position') {
     parts.push('- 凡是要我改数字的，告诉我「改大是往哪边/变什么，改小是往哪边/变什么」，比如“这个数字越大字越大”“上边距越大越往下”；');
   }
+  parts.push('- 我会在「自定义CSS」框里用搜索找到要改的地方。请给我一小段独一无二的原文片段当搜索词（比如一整句 `background-color: var(--xxx)`），别只给类名——类名会搜到一大堆，我找不准。搜索词越短越好，但要能精确定位；');
   parts.push('- 最后把我要粘贴的完整代码单独放一个代码块，让我能一次性整段复制，不用自己拼。');
   return parts.join('\n');
 }

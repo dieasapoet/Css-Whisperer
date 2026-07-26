@@ -256,6 +256,74 @@
   color: var(--tt-text-tertiary);
 }
 
+/* ========================================
+ * CSS 编辑框（搜索 / 粘贴 / 保存）
+ * ======================================== */
+.cssw-editor-btn {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 10px;
+  background: transparent;
+  color: var(--tt-text);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-btn);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.cssw-editor-btn:hover { background: rgba(128, 128, 128, 0.1); }
+
+.cssw-editor-searchrow {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.cssw-editor-search {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-btn);
+  background: var(--tt-input-bg);
+  color: var(--tt-text);
+  font-size: 13px;
+  font-family: inherit;
+}
+.cssw-editor-find {
+  flex: 0 0 auto;
+  height: 38px;
+  padding: 0 14px;
+  background: var(--tt-accent);
+  color: #fff;
+  border: 1px solid var(--tt-accent);
+  border-radius: var(--tt-radius-btn);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.cssw-editor-textarea {
+  width: 100%;
+  min-height: 220px;
+  padding: 10px;
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-card);
+  background: var(--tt-input-bg);
+  color: var(--tt-text);
+  font-size: 12.5px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.cssw-editor-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--tt-text-tertiary);
+  line-height: 1.4;
+}
+
 .cssw-chain {
   margin-top: 8px;
 }
