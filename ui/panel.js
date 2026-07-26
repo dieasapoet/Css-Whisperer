@@ -257,10 +257,10 @@ function onGenerate() {
   const info = identify(el);
   let analysis;
   try {
-    analysis = analyze(el);   // 当场读 CSS，看完即焚
+    analysis = analyze(el, sel.whatKey);   // 当场读 CSS，看完即焚；按"改什么"过滤属性
   } catch (e) {
     console.error('[css-whisperer] 分析失败', e);
-    analysis = { matchedRules: [], variables: [], computed: {}, partialUnreadable: true };
+    analysis = { relevantRules: [], pseudo: [], variables: [], computed: {}, authoredHere: false, partialUnreadable: true };
   }
 
   const locator = buildLocator(el, info.standardSelector);
