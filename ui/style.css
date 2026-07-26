@@ -44,6 +44,24 @@
   --tt-blur: none;
 }
 
+/* 字号 / 间距令牌（两皮肤一致，避免 16/18/13 混排）——卡片向导派统一走这套 */
+.cssw-skin-frosted,
+.cssw-skin-claude {
+  --tt-fs-title: 17px;   /* 卡片主标题（区域名） */
+  --tt-fs-body: 14px;    /* 正文/问句 */
+  --tt-fs-label: 12px;   /* 小标签（"正在改"、层级） */
+  --tt-fs-note: 12.5px;  /* 解释说明 */
+  --tt-space-card: 12px; /* 卡片内边距 */
+}
+
+/* 卡片容器（各 step 统一外观：圆角/描边/间距走令牌） */
+.cssw-card {
+  padding: var(--tt-space-card);
+  background: var(--tt-card-bg);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-card);
+}
+
 /* ========================================
  * 面板容器（底部抽屉，双端自适应）
  * ======================================== */
@@ -71,7 +89,21 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 14px;
   overflow: hidden;
+  resize: both;             /* 右下角可拖拽调整大小 */
+  min-width: 300px;
+  min-height: 0;            /* 修 #2：不强撑高度，面板高度跟着内容走，内容少时不留下半空白 */
 }
+/* 被拖动过：切成显式定位（JS 设 left/top），取消居中 margin */
+.cssw-panel.cssw-moved {
+  right: auto;
+  margin: 0;
+  max-height: 90vh;         /* 高度跟内容走，但封顶不跑出屏幕(#2：不再恢复记忆高度) */
+}
+/* 拖动手柄：整条工具栏空白处可拖（标题区），按钮不触发拖动 */
+.cssw-toolbar { cursor: grab; }
+.cssw-toolbar:active { cursor: grabbing; }
+.cssw-toolbar .cssw-tb,
+.cssw-toolbar .cssw-skin-select { cursor: pointer; }
 
 .cssw-panel[data-open="false"] {
   display: none;
@@ -174,10 +206,14 @@
 .cssw-tb.active { border-color: var(--tt-accent); }
 .cssw-tb-title {
   flex: 1;
+  min-width: 0;
   text-align: center;
   font-weight: 700;
   font-size: 14px;
   color: var(--tt-text);
+  white-space: nowrap;      /* 修 #3：窄宽下不竖排 */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cssw-skin-select {
   height: 32px;
@@ -231,20 +267,24 @@
 .cssw-step:last-child { margin-bottom: 0; }
 
 /* ========================================
- * 区域名 + 层级链
+ * 区域名卡片 + 层级链（面包屑）
  * ======================================== */
-.cssw-area-name {
-  font-size: 16px;
-  color: var(--tt-text);
-  padding: 4px 2px;
+.cssw-area-card { display: flex; flex-direction: column; gap: 3px; }
+.cssw-area-label {
+  font-size: var(--tt-fs-label);
+  color: var(--tt-text-tertiary);
+  letter-spacing: 0.02em;
 }
-.cssw-area-name b {
-  font-size: 18px;
+.cssw-area-name {
+  font-size: var(--tt-fs-title);
+  font-weight: 700;
   color: var(--tt-accent);
+  line-height: 1.3;
 }
 .cssw-area-note {
-  font-size: 13px;
-  color: var(--tt-text-tertiary);
+  font-size: var(--tt-fs-note);
+  color: var(--tt-text-secondary);
+  line-height: 1.5;
 }
 
 /* ========================================
@@ -323,16 +363,39 @@
 .cssw-editor-undo:hover:not(:disabled), .cssw-editor-reset:hover, .cssw-editor-redo:hover:not(:disabled) { background: rgba(128, 128, 128, 0.12); }
 .cssw-editor-redo:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* CodeMirror 宿主 + 搜索高亮 + 加载提示 */
+/* 编辑器顶部提示（检测到柏宝箱时） */
+.cssw-editor-tip {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--tt-text-secondary);
+  background: var(--tt-card-bg);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-btn);
+}
+
+/* 编辑区 textarea（镜像 #customCSS；搜索用原生 setSelectionRange 选中，不叠层→不抖） */
 .cssw-editor-host { margin-bottom: 6px; }
-.cssw-editor-host .CodeMirror {
+.cssw-editor-textarea {
+  display: block;
+  width: 100%;
   height: 260px;
+  padding: 10px;
   border: 1px solid var(--tt-border);
   border-radius: var(--tt-radius-card);
+  background: var(--tt-input-bg);
+  color: var(--tt-text);
   font-size: 12.5px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  line-height: 1.5;
+  box-sizing: border-box;
+  resize: vertical;
+  white-space: pre-wrap;      /* 到宽度自动换行，不需左右滑动看内容 */
+  word-break: break-word;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
-.cssw-cm-match { background: rgba(217, 119, 87, 0.35); border-radius: 2px; }
 .cssw-editor-loading { font-size: 12px; color: var(--tt-text-tertiary); padding: 4px 2px; }
 
 /* 自己描述输入框 */
@@ -349,98 +412,58 @@
   font-family: inherit;
   box-sizing: border-box;
 }
-.cssw-editor-undo:disabled { opacity: 0.4; cursor: not-allowed; }
+.cssw-editor-undo:disabled, .cssw-editor-redo:disabled { opacity: 0.4; cursor: not-allowed; }
 .cssw-editor-reset { color: var(--tt-danger); border-color: var(--tt-danger); }
 
-/* 编辑框 + 搜索高亮层（highlight 铺在 textarea 背后，textarea 背景透明）
- * 两者字体/行高/padding 必须完全一致，文字才对齐。 */
-.cssw-editor-wrap {
-  position: relative;
-  width: 100%;
-  min-height: 220px;
-}
-.cssw-editor-highlight,
-.cssw-editor-textarea {
-  margin: 0;
-  padding: 10px;
-  border: 1px solid var(--tt-border);
-  border-radius: var(--tt-radius-card);
-  font-size: 12.5px;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  line-height: 1.5;
-  box-sizing: border-box;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
-.cssw-editor-highlight {
-  position: absolute;
-  inset: 0;
-  overflow: auto;
-  color: transparent;
-  background: var(--tt-input-bg);
-  pointer-events: none;
-  z-index: 0;
-}
-.cssw-editor-highlight .cssw-hl {
-  background: rgba(217, 119, 87, 0.35);
-  color: transparent;
-  border-radius: 2px;
-}
-.cssw-editor-textarea {
-  position: relative;
-  z-index: 1;
-  display: block;
-  width: 100%;
-  min-height: 220px;
-  height: 100%;
-  color: var(--tt-text);
-  background: transparent;
-  resize: vertical;
-}
-.cssw-editor-hint {
-  margin-top: 6px;
-  font-size: 11px;
-  color: var(--tt-text-tertiary);
-  line-height: 1.4;
-}
-
 .cssw-chain {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--tt-border);
 }
 .cssw-chain-tip {
-  font-size: 12px;
+  flex: 0 0 auto;
+  font-size: var(--tt-fs-label);
   color: var(--tt-text-tertiary);
-  margin-bottom: 6px;
 }
-.cssw-chain-list {
+/* 面包屑：一行横向排列，超出可横向滚动（不再平铺占大片竖向空间） */
+.cssw-chain-crumbs {
+  flex: 1;
+  min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: thin;
 }
-.cssw-chain-item {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  width: 100%;
-  text-align: left;
-  padding: 7px 10px;
-  background: var(--tt-card-bg);
+.cssw-chain-crumbs::-webkit-scrollbar { height: 4px; }
+.cssw-chain-crumbs::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 2px; }
+.cssw-crumb {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  background: transparent;
   border: 1px solid var(--tt-border);
-  border-radius: var(--tt-radius-btn);
-  color: var(--tt-text);
+  border-radius: 12px;
+  color: var(--tt-text-secondary);
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.15s, border-color 0.15s;
+  font-size: var(--tt-fs-label);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-.cssw-chain-nm { flex: 0 0 auto; font-size: 13px; font-weight: 600; }
-.cssw-chain-note { flex: 1; font-size: 11px; color: var(--tt-text-tertiary); }
-.cssw-chain-item:hover { background: rgba(128, 128, 128, 0.1); }
-.cssw-chain-item.active {
+.cssw-crumb:hover { background: rgba(128, 128, 128, 0.12); }
+.cssw-crumb.active {
   background: var(--tt-accent);
   border-color: var(--tt-accent);
   color: #fff;
   font-weight: 600;
+}
+.cssw-crumb-sep {
+  flex: 0 0 auto;
+  color: var(--tt-text-tertiary);
+  font-size: var(--tt-fs-label);
 }
 
 .cssw-repick {
@@ -460,13 +483,77 @@
  * 问答（改什么 / 怎么改）
  * ======================================== */
 .cssw-q {
-  font-size: 14px;
+  font-size: var(--tt-fs-body);
   font-weight: 600;
   color: var(--tt-text);
   margin-bottom: 8px;
 }
 
-/* 紧凑标签 chip（改什么 / 怎么改，网格排列） */
+/* 部位选择卡片（背景/文字/边框/…）：两列网格，选中即在其下就地展开"怎么改" */
+.cssw-parts {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  align-items: start;
+}
+.cssw-part-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 24px 8px 10px;  /* 右留位给展开箭头 */
+  text-align: left;
+  background: var(--tt-input-bg);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-btn);
+  color: var(--tt-text);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.cssw-part-card:hover { border-color: var(--tt-accent); }
+.cssw-part-card:active { transform: scale(0.98); }
+.cssw-part-name { font-size: var(--tt-fs-body); font-weight: 600; }
+.cssw-part-note { font-size: 11px; color: var(--tt-text-tertiary); line-height: 1.35; }
+.cssw-part-caret {
+  position: absolute;
+  top: 8px; right: 8px;
+  font-size: 9px;
+  color: var(--tt-text-tertiary);
+  line-height: 1;
+}
+.cssw-part-card.active {
+  background: var(--tt-accent);
+  border-color: var(--tt-accent);
+  color: #fff;
+  /* 选中且展开时，底边贴合下方面板（去掉圆角+去掉底边视觉断层） */
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+/* 选中态：解释文字/箭头也转白色系（修 #5：Claude 皮肤橙底灰字看不清） */
+.cssw-part-card.active .cssw-part-note { color: rgba(255, 255, 255, 0.85); }
+.cssw-part-card.active .cssw-part-caret { color: rgba(255, 255, 255, 0.9); }
+
+/* 手风琴展开体：横跨整行，紧贴其部位卡下方，视觉上从属该卡 */
+.cssw-how-panel {
+  grid-column: 1 / -1;
+  margin-top: -6px;   /* 抵消 grid gap，与上方选中卡片贴合 */
+  margin-bottom: 4px;
+  padding: 10px;
+  background: var(--tt-card-bg);
+  border: 1px solid var(--tt-accent);
+  border-top: none;
+  border-radius: 0 0 var(--tt-radius-card) var(--tt-radius-card);
+}
+.cssw-how-title {
+  font-size: var(--tt-fs-note);
+  font-weight: 600;
+  color: var(--tt-text);
+  margin-bottom: 8px;
+}
+
+/* 紧凑标签 chip（"怎么改"小选项） */
 .cssw-chips {
   display: flex;
   flex-wrap: wrap;
@@ -477,7 +564,7 @@
 .cssw-chip {
   padding: 6px 12px;
   min-height: 32px;
-  background: var(--tt-card-bg);
+  background: var(--tt-input-bg);
   border: 1px solid var(--tt-border);
   border-radius: 16px;
   color: var(--tt-text);
@@ -496,32 +583,27 @@
 }
 .cssw-how-chip { font-size: 12px; padding: 5px 10px; min-height: 28px; }
 
-/* 每个已选"改什么"下面的"怎么改"行 */
-.cssw-how-groups { margin-bottom: 10px; }
-.cssw-how-row {
+/* ========================================
+ * 固定底部操作条（sticky footer，修 #3：缩小面板也不被遮挡）
+ * 面板结构 = 工具栏(顶,常驻) + body(中,滚动) + footer(底,常驻)
+ * ======================================== */
+.cssw-footer {
+  flex-shrink: 0;
   display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 6px 0;
-  border-top: 1px dashed var(--tt-border);
+  gap: 8px;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--tt-border);
+  background: var(--tt-bg-solid);
 }
-.cssw-how-label {
-  flex: 0 0 auto;
-  font-size: 12px;
-  color: var(--tt-text-secondary);
-  padding-top: 5px;
-  min-width: 44px;
-}
-
-.cssw-what-actions { display: flex; flex-direction: column; gap: 8px; }
+.cssw-footer[hidden] { display: none; }
 .cssw-add-btn {
-  width: 100%;
-  min-height: 40px;
+  flex: 1;
+  min-height: 42px;
   background: transparent;
   color: var(--tt-accent);
   border: 1px solid var(--tt-accent);
   border-radius: var(--tt-radius-btn);
-  font-size: 14px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
   transition: background 0.15s;
@@ -530,13 +612,13 @@
 .cssw-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .cssw-gen-btn {
-  width: 100%;
-  min-height: 46px;
+  flex: 1.4;
+  min-height: 42px;
   background: var(--tt-accent);
   color: #fff;
   border: 1px solid var(--tt-accent);
   border-radius: var(--tt-radius-btn);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
@@ -625,50 +707,51 @@
 /* ========================================
  * 拾取状态条
  * ======================================== */
-/* 定位：放屏幕底部（输入栏上方），不盖顶栏——顶栏常是用户要去点选的目标。
- * 不用 transform:translateX(-50%)——ST 给 <html> 加了 transform，会让 translate 百分比算错、文字竖排。 */
+/* 定位：吸附在 ST 顶栏(#top-settings-holder)底部——顶边紧接顶栏底边，绝不遮挡底部输入栏。
+ * 用 top 定位（真机可靠）：ST 给 <html> 加了 transform，bottom/translate 百分比会算错。
+ * top 值 = 顶栏高度变量 --topBarBlockSize；变量缺失时回退到 44px。 */
 .cssw-status-bar {
   position: fixed;
-  bottom: 12px;
-  top: auto;
-  left: 8px;
-  right: 8px;
-  margin: 0 auto;
+  top: var(--topBarBlockSize, 44px);
+  left: 0;
+  right: 0;
+  margin: 6px auto 0;
   width: max-content;
-  max-width: calc(100vw - 16px);
+  max-width: calc(100vw - 24px);
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  background: #d97757;
-  color: #fff !important;
-  border-radius: 24px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  background: var(--tt-bg-solid, rgba(30, 30, 30, 0.92));
+  color: var(--tt-text, #eee);
+  border: 1px solid var(--tt-accent, #d97757);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
   z-index: 100004;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
-  animation: cssw-status-pulse 2s ease-in-out infinite;
 }
-@keyframes cssw-status-pulse {
-  0%, 100% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); }
-  50% { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3); }
-}
-.cssw-status-icon { font-size: 16px; flex-shrink: 0; }
+.cssw-status-icon { font-size: 14px; flex-shrink: 0; }
 .cssw-status-text { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
 .cssw-status-cancel {
   flex-shrink: 0;
-  padding: 4px 12px;
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  color: #fff !important;
-  border-radius: 12px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--tt-text-secondary, #aaa);
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 12px;
-  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1;
 }
-.cssw-status-cancel:hover { background: rgba(255, 255, 255, 0.3); }
+.cssw-status-cancel:hover { background: rgba(128, 128, 128, 0.2); color: var(--tt-text, #fff); }
 
 /* ========================================
  * 高亮层

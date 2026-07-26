@@ -5,3 +5,7 @@
 .DS_Store
 Thumbs.db
 node_modules/
+# 开发内部文档（含本机绝对路径/开发笔记，不发布给终端用户）
+HANDOVER.md
+进度.md
+v0.8.0-重设计规格.md

@@ -19,43 +19,51 @@
 
 /**
  * "改什么"→ 相关 CSS 属性组
- * key 与 prompt-builder 的 WHAT_OPTIONS 对齐。
+ * ★ 三键契约：key 与 prompt-builder 的 WHAT_OPTIONS、HOW_OPTIONS 一一对应。
+ *   每个部位的属性数组 = 该部位所有二级选项 props 的并集（改一处必须同步另两处）。
  * 用于：① 过滤规则（只留声明了这些属性的）② 读 computed 摘要 ③ 判断 authoredHere
  */
 const PROP_GROUPS = {
-  color: [
-    'color', 'background', 'background-color', 'background-image',
-    'border-color', 'fill', 'stroke', 'opacity', 'box-shadow', 'text-shadow',
+  // 背景：底色、背景图、透明度
+  background: [
+    'background', 'background-color', 'background-image',
+    'background-size', 'background-position', 'opacity',
   ],
-  size: [
-    'font-size', 'font-weight', 'line-height', 'width', 'height',
-    'min-width', 'min-height', 'max-width', 'max-height',
-    'border-radius', 'border-width', 'border',
-  ],
-  position: [
-    'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
-    'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
-    'position', 'top', 'right', 'bottom', 'left',
-    'display', 'flex', 'justify-content', 'align-items', 'gap', 'text-align',
-  ],
-  // 文字/文案：改界面上显示的字（含伪元素 content 画的假文字，如输入框占位文字）
+  // 文字：字号/字型/粗细/字色/行距字距 + 文案(content) + 阴影/对齐
   text: [
-    'content', 'color', 'font-size', 'font-weight', 'font-family',
-    'letter-spacing', 'text-align', 'line-height', 'text-shadow',
+    'color', 'font-size', 'font-weight', 'font-family', 'font-style',
+    'line-height', 'letter-spacing', 'content', 'text-shadow', 'text-align',
   ],
-  // 字体：字型（多为全局变量控制）
-  font: [
-    'font-family', 'font-size', 'font-weight', 'letter-spacing', 'line-height',
+  // 边框：边/描边/圆角
+  border: [
+    'border', 'border-color', 'border-width', 'border-style',
+    'border-radius', 'outline', 'outline-color',
   ],
-  // 图标/图案：换图标(多为伪元素 content)、换背景图
+  // 尺寸和间距：盒子宽高、内外边距、定位、整体缩放（含 font-size，供"整体变大/变小"）
+  box: [
+    'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+    'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+    'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+    'position', 'top', 'right', 'bottom', 'left',
+    'display', 'flex', 'justify-content', 'align-items', 'gap',
+    'text-align', 'transform', 'font-size',
+  ],
+  // 图标：换图标(多为伪元素 content)、换成图片、图标颜色和大小
   icon: [
-    'content', 'background', 'background-image', 'background-color',
-    'color', 'fill', 'stroke', 'mask', '-webkit-mask',
+    'content', 'color', 'fill', 'stroke',
+    'background', 'background-image', 'background-color', 'background-size',
+    'mask', '-webkit-mask', 'font-size', 'font-family', 'width', 'height',
+  ],
+  // 特效：阴影、发光、毛玻璃模糊
+  effect: [
+    'box-shadow', 'text-shadow', 'filter',
+    'backdrop-filter', '-webkit-backdrop-filter',
   ],
   // 自定义/兜底：不过滤，给一组常见的
   custom: [
-    'content', 'color', 'background', 'background-color', 'font-size', 'border-radius',
-    'padding', 'margin', 'width', 'height', 'border', 'box-shadow', 'opacity',
+    'content', 'color', 'background', 'background-color', 'background-image',
+    'font-size', 'font-family', 'font-weight', 'border', 'border-radius',
+    'padding', 'margin', 'width', 'height', 'box-shadow', 'opacity', 'filter',
   ],
 };
 
@@ -72,7 +80,7 @@ function getPropGroup(whatKey) {
 /**
  * 分析一个元素
  * @param {Element} el
- * @param {string} whatKey - 用户想改什么（color/size/position/custom）
+ * @param {string|string[]} whatKey - 用户想改的部位 key（background/text/border/box/icon/effect/custom），可传数组多选取并集
  * @returns {Object}
  */
 function analyze(el, whatKey) {
@@ -101,9 +109,10 @@ function analyze(el, whatKey) {
   } catch (_) {}
 
   // 字体全局检测：font-family 若解析到 var(--xxx)，且该变量定义在 :root，
-  // 说明字体是全局变量控制的，改它会影响整个界面。
-  const wantsFont = whatKey === 'font' || whatKey === 'text'
-    || (Array.isArray(whatKey) && (whatKey.includes('font') || whatKey.includes('text')));
+  // 说明字体是全局变量控制的，改它会影响整个界面。（在"文字"部位下检测；
+  // 是否向用户发全局警告由 prompt-builder 按二级选项 text-font/text-global-font 决定）
+  const wantsFont = whatKey === 'text'
+    || (Array.isArray(whatKey) && whatKey.includes('text'));
   if (wantsFont && computed) {
     try {
       // 从命中规则的 cssText 里看 font-family 是否写成 var(...)

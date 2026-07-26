@@ -85,8 +85,8 @@ function showStatusBar() {
     statusBarEl.className = 'cssw-status-bar';
     statusBarEl.innerHTML = `
       <span class="cssw-status-icon">🎯</span>
-      <span class="cssw-status-text">正在选择元素 — 点击任意区域拾取</span>
-      <button type="button" class="cssw-status-cancel">取消（ESC）</button>
+      <span class="cssw-status-text">已进入抓取状态，点你想改的地方</span>
+      <button type="button" class="cssw-status-cancel" title="取消（ESC）">✕</button>
     `;
     statusBarEl.querySelector('.cssw-status-cancel').addEventListener('click', (e) => {
       e.stopPropagation();
