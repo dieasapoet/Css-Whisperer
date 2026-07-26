@@ -251,6 +251,10 @@
   font-size: 18px;
   color: var(--tt-accent);
 }
+.cssw-area-note {
+  font-size: 13px;
+  color: var(--tt-text-tertiary);
+}
 
 .cssw-chain {
   margin-top: 8px;

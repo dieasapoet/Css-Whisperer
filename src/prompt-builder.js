@@ -108,10 +108,11 @@ function buildPrompt(p) {
       lines.push('（注：部分外部样式表读不到，以上可能不完整。）');
     }
     lines.push('');
-    lines.push('请给我三种做法，让我照着做：');
-    lines.push('① 教我改哪个数值——告诉我在上面哪一行、改成多少；');
-    lines.push('② 找到那段 → 整段替换：把要替换的原代码和新代码都完整给我；');
-    lines.push('③ 如果上面的规则不好直接改，给我一段可以加进「自定义CSS」的覆盖代码。');
+    lines.push('请给我三种做法：');
+    lines.push('① 改数值：告诉我上面哪一行、把哪个数字改成多少；');
+    lines.push('② 整段替换：把原来那段和替换后的完整代码都给我；');
+    lines.push('③ 覆盖：给我一段能加进「自定义CSS」的代码。');
+    lines.push(pushHint(p));
   } else {
     // ===== 情形 B：作者没针对这里写样式，从零生成 =====
     lines.push('但当前主题好像没有专门针对这里的样式，需要从零加。');
@@ -126,17 +127,27 @@ function buildPrompt(p) {
       lines.push('（注：部分外部样式表读不到，可能有我没找到的规则。）');
     }
     lines.push('');
-    lines.push('请直接给我一段全新的 CSS，让我加进 SillyTavern 的「自定义CSS」框里就能生效，');
-    lines.push('并告诉我：把这段代码粘到「用户设置 → 自定义CSS」里保存即可。');
+    lines.push('请给我一段全新的 CSS，加进 SillyTavern 的「自定义CSS」框里就能生效。');
+    lines.push(pushHint(p));
   }
 
-  // ===== 作者授权提醒（法律/道德，交给用户判断）=====
-  lines.push('');
-  lines.push('———');
-  lines.push('温馨提示：以上 CSS 可能来自主题作者的作品。若作者声明「不允许二次修改」，');
-  lines.push('请不要这样做；是否把这些代码发给 AI，请你自己确认后再操作。');
-
   return lines.join('\n');
+}
+
+/**
+ * 给 AI 的统一收尾要求：说人话、教数值方向、最终代码单独放一块方便一键复制。
+ * 数值方向要求只在"大小/位置"类调整时加（改数值方向对小白最容易懵）。
+ */
+function pushHint(p) {
+  const parts = [];
+  parts.push('');
+  parts.push('几个要求：');
+  parts.push('- 用简单的大白话讲，别太长，别堆术语，我是新手；');
+  if (p.whatKey === 'size' || p.whatKey === 'position') {
+    parts.push('- 凡是要我改数字的，告诉我「改大是往哪边/变什么，改小是往哪边/变什么」，比如“这个数字越大字越大”“上边距越大越往下”；');
+  }
+  parts.push('- 最后把我要粘贴的完整代码单独放一个代码块，让我能一次性整段复制，不用自己拼。');
+  return parts.join('\n');
 }
 
 function elementLocatorText(analysis, locator) {

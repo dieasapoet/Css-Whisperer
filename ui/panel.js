@@ -27,6 +27,7 @@ const SKIN_FROSTED = 'cssw-skin-frosted';
 const SKIN_CLAUDE = 'cssw-skin-claude';
 const SKIN_STORAGE_KEY = 'css-whisperer:skin';
 const ORB_POS_KEY = 'css-whisperer:orb-pos';
+const NOTICE_KEY = 'css-whisperer:first-run-notice';
 const DRAG_THRESHOLD = 5;
 
 let panelEl = null;
@@ -232,6 +233,16 @@ function bindShellEvents() {
 // 外部入口（魔棒菜单点击）：默认展开面板
 function openPanel() {
   expandPanel();
+  maybeShowFirstRunNotice();
+}
+
+// 首次使用提醒一次（尊重作者授权），之后不再出现
+function maybeShowFirstRunNotice() {
+  try {
+    if (localStorage.getItem(NOTICE_KEY)) return;
+    localStorage.setItem(NOTICE_KEY, '1');
+  } catch (_) {}
+  showToast('本工具帮你把想改的地方翻译成给 AI 的提问。请尊重主题作者的授权，仅在允许的范围内修改。');
 }
 
 // 展开：显示面板，隐藏圆球
@@ -307,9 +318,10 @@ function renderArea() {
   let chainButtons = '';
   if (containerChain.length > 1) {
     chainButtons = containerChain.map((node, i) => {
-      const nm = identify(node).name;
+      const ci = identify(node);
+      const label = ci.note ? `${ci.name}（${ci.note}）` : ci.name;
       const active = i === chainIndex ? ' active' : '';
-      return `<button type="button" class="cssw-chain-item${active}" data-idx="${i}">${escapeHtml(nm)}</button>`;
+      return `<button type="button" class="cssw-chain-item${active}" data-idx="${i}">${escapeHtml(label)}</button>`;
     }).join('');
     chainButtons = `<div class="cssw-chain">
         <div class="cssw-chain-hint">选大一点 / 小一点：</div>
@@ -317,8 +329,11 @@ function renderArea() {
       </div>`;
   }
 
+  const nameLabel = info.note
+    ? `<b>${escapeHtml(info.name)}</b><span class="cssw-area-note">（${escapeHtml(info.note)}）</span>`
+    : `<b>${escapeHtml(info.name)}</b>`;
   step.innerHTML = `
-    <div class="cssw-area-name">这是：<b>${escapeHtml(info.name)}</b></div>
+    <div class="cssw-area-name">这是：${nameLabel}</div>
     ${chainButtons}
     <button type="button" class="cssw-repick">↺ 重新点选</button>
   `;
@@ -407,7 +422,8 @@ function onGenerate() {
 
   const locator = buildLocator(el, info.standardSelector);
   const text = buildPrompt({
-    areaName: info.name,
+    areaName: info.note ? `${info.name}（${info.note}）` : info.name,
+    whatKey: sel.whatKey,
     whatLabel: sel.whatLabel || '样式',
     howLabel: sel.howLabel || '（见下方描述）',
     customText: sel.customText,
