@@ -85,6 +85,65 @@
 }
 
 /* ========================================
+ * 小圆球（收起态，可拖拽）
+ * ======================================== */
+.cssw-orb {
+  position: fixed;
+  top: 50%;
+  left: 90%;
+  width: 46px;
+  height: 46px;
+  display: none;   /* 由 JS 控制显隐 */
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--tt-bg-solid);
+  backdrop-filter: var(--tt-blur);
+  -webkit-backdrop-filter: var(--tt-blur);
+  color: var(--tt-text);
+  border: 1px solid var(--tt-border);
+  border-radius: 50%;
+  box-shadow: var(--tt-shadow-strong);
+  z-index: 100002;
+  cursor: grab;
+  touch-action: none;   /* 让 pointermove 拖拽不被浏览器手势吞掉 */
+  user-select: none;
+  transition: transform 0.1s, opacity 0.15s;
+}
+.cssw-orb:active { cursor: grabbing; transform: scale(0.94); }
+.cssw-orb-icon { font-size: 22px; line-height: 1; pointer-events: none; }
+
+/* 选择模式：圆球半透明让位 + 强调色脉冲，明确"正在选择" */
+.cssw-orb-picking {
+  opacity: 0.5;
+  border-color: var(--tt-accent);
+  animation: cssw-orb-pulse 1.2s ease-in-out infinite;
+}
+.cssw-orb-picking:hover { opacity: 1; }
+@keyframes cssw-orb-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(217, 119, 87, 0.5); }
+  50%      { box-shadow: 0 0 0 8px rgba(217, 119, 87, 0); }
+}
+
+/* 头部按钮：收起成小球 */
+.cssw-min {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--tt-text-secondary);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  border-radius: var(--tt-radius-btn);
+  transition: background 0.15s;
+}
+.cssw-min:hover { background: rgba(128, 128, 128, 0.12); }
+
+/* ========================================
  * 头部
  * ======================================== */
 .cssw-header {
@@ -92,7 +151,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--tt-border);
   cursor: default;
 }
@@ -144,7 +203,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px));
   -webkit-overflow-scrolling: touch;
 }
 
@@ -347,15 +406,20 @@
 /* ========================================
  * 拾取状态条
  * ======================================== */
+/* 定位：不用 transform:translateX(-50%)——ST 给 <html> 加了 transform，
+ * 会让 translate 百分比算错、文字被挤成竖排。改用 left/right+margin auto 居中。 */
 .cssw-status-bar {
   position: fixed;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 10px;
+  left: 8px;
+  right: 8px;
+  margin: 0 auto;
+  width: max-content;
+  max-width: calc(100vw - 16px);
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 16px;
+  padding: 8px 14px;
   background: #d97757;
   color: #fff !important;
   border-radius: 24px;
@@ -364,15 +428,17 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 14px;
   font-weight: 500;
+  white-space: nowrap;
   animation: cssw-status-pulse 2s ease-in-out infinite;
 }
 @keyframes cssw-status-pulse {
   0%, 100% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); }
   50% { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3); }
 }
-.cssw-status-icon { font-size: 16px; }
-.cssw-status-text { flex: 1; }
+.cssw-status-icon { font-size: 16px; flex-shrink: 0; }
+.cssw-status-text { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
 .cssw-status-cancel {
+  flex-shrink: 0;
   padding: 4px 12px;
   background: rgba(255, 255, 255, 0.2);
   border: 1px solid rgba(255, 255, 255, 0.4);
@@ -380,6 +446,7 @@
   border-radius: 12px;
   cursor: pointer;
   font-size: 12px;
+  white-space: nowrap;
 }
 .cssw-status-cancel:hover { background: rgba(255, 255, 255, 0.3); }
 

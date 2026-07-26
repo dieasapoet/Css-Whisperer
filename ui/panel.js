@@ -1,15 +1,19 @@
 /**
  * 面板 —— 引导式问答（翻译助手的主界面）
  *
- * 流程：
- *   打开面板 → 点「点选元素」→ 在页面点一处
- *   → 面板显示"这是【区域名】"（可放大/缩小选择）
- *   → 选"改什么"（颜色/大小/位置/自定义）
- *   → 选"怎么改"（+ 可选自定义补充）
- *   → 当场分析该处 CSS → 生成给 AI 的提问文字 → 一键复制
+ * 两态设计：
+ *   - 收起态：一个可拖拽的小圆球（默认停右侧边缘），点它展开面板。占地极小、不挡视线。
+ *   - 展开态：完整问答面板（点选→区域→改什么→怎么改→生成提问→复制）。
+ *   进入选择模式时面板自动收成圆球并半透明让位，圆球脉冲高亮反馈"正在选择"。
  *
- * 皮肤：磨砂 / Claude 两套，用下拉栏选择（为将来"用户自装主题"留扩展位）。
- * 皮肤只影响本面板自身外观，不碰作者主题。
+ * ★ 防抽屉收起（沿用 theme-tap 验证过的方案）：
+ *   ST 会"点到抽屉外部就自动收起抽屉"。若不处理，用户展开角色面板后一点插件，
+ *   面板就被收起，永远选不到抽屉里的元素（如角色头像大小）。
+ *   解法：圆球和面板都吞掉自己的 click + mousedown（stopPropagation），
+ *   让 ST 收不到"外部点击"，抽屉保持展开。
+ *   配合 picker 只拦 click 不拦 pointerdown，用户可"先展开抽屉再进选择模式点里面"。
+ *
+ * 皮肤：磨砂 / Claude 两套，下拉选择。只影响本面板外观，不碰作者主题。
  */
 
 import { enterPickMode, exitPickMode, isPicking, getContainerChain, showToast } from '../src/picker.js';
@@ -18,17 +22,22 @@ import { analyze } from '../src/analyzer.js';
 import { WHAT_OPTIONS, getHowOptions, buildPrompt } from '../src/prompt-builder.js';
 
 const PANEL_ID = 'cssw-panel';
+const ORB_ID = 'cssw-orb';
 const SKIN_FROSTED = 'cssw-skin-frosted';
 const SKIN_CLAUDE = 'cssw-skin-claude';
 const SKIN_STORAGE_KEY = 'css-whisperer:skin';
+const ORB_POS_KEY = 'css-whisperer:orb-pos';
+const DRAG_THRESHOLD = 5;
 
 let panelEl = null;
+let orbEl = null;
 let currentSkin = 'frosted';
+let orbGesture = null;
 
 // 当前选择状态
-let containerChain = [];   // 从细到粗的层级链
-let chainIndex = 0;        // 当前选中层级
-let currentTarget = null;  // 当前元素
+let containerChain = [];
+let chainIndex = 0;
+let currentTarget = null;
 let sel = { whatKey: null, whatLabel: null, howKey: null, howLabel: null, customText: '' };
 
 /* ============ 皮肤 ============ */
@@ -50,9 +59,12 @@ function persistSkin(skin) {
 }
 
 function applySkin() {
-  if (!panelEl) return;
-  panelEl.classList.remove(SKIN_FROSTED, SKIN_CLAUDE);
-  panelEl.classList.add(getSkinClass());
+  const cls = getSkinClass();
+  [panelEl, orbEl].forEach((el) => {
+    if (!el) return;
+    el.classList.remove(SKIN_FROSTED, SKIN_CLAUDE);
+    el.classList.add(cls);
+  });
 }
 
 /* ============ 初始化 ============ */
@@ -60,6 +72,101 @@ function applySkin() {
 function initPanel() {
   currentSkin = loadSkin();
 }
+
+/* ============ 圆球（收起态） ============ */
+
+function ensureOrb() {
+  if (orbEl && document.body.contains(orbEl)) return orbEl;
+
+  orbEl = document.createElement('button');
+  orbEl.id = ORB_ID;
+  orbEl.type = 'button';
+  orbEl.className = 'cssw-orb ' + getSkinClass();
+  orbEl.setAttribute('aria-label', '打开点问');
+  orbEl.innerHTML = '<span class="cssw-orb-icon">💬</span>';
+  document.body.appendChild(orbEl);
+
+  const pos = loadOrbPos();
+  positionOrb(pos.fx, pos.fy);
+
+  // 拖拽（Pointer Events + 5px 阈值区分点击/拖动）
+  orbEl.addEventListener('pointerdown', onOrbPointerDown);
+  orbEl.addEventListener('pointermove', onOrbPointerMove);
+  orbEl.addEventListener('pointerup', onOrbPointerUp);
+  orbEl.addEventListener('pointercancel', () => { orbGesture = null; });
+
+  // ★ 防抽屉收起：吞掉 click + mousedown，别让 ST 当成"外部点击"
+  orbEl.addEventListener('click', (e) => e.stopPropagation());
+  orbEl.addEventListener('mousedown', (e) => e.stopPropagation());
+
+  return orbEl;
+}
+
+function onOrbPointerDown(e) {
+  if (!e.isPrimary) return;
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+  orbGesture = {
+    pointerId: e.pointerId,
+    startX: e.clientX,
+    startY: e.clientY,
+    startRect: e.currentTarget.getBoundingClientRect(),
+    dragging: false,
+  };
+}
+
+function onOrbPointerMove(e) {
+  if (!orbGesture || e.pointerId !== orbGesture.pointerId) return;
+  const dist = Math.hypot(e.clientX - orbGesture.startX, e.clientY - orbGesture.startY);
+  if (dist > DRAG_THRESHOLD) orbGesture.dragging = true;
+  if (orbGesture.dragging) {
+    const nx = orbGesture.startRect.x + e.clientX - orbGesture.startX;
+    const ny = orbGesture.startRect.y + e.clientY - orbGesture.startY;
+    positionOrb(nx / window.innerWidth, ny / window.innerHeight);
+  }
+}
+
+function onOrbPointerUp(e) {
+  if (!orbGesture || e.pointerId !== orbGesture.pointerId) return;
+  const wasDrag = orbGesture.dragging;
+  try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+  orbGesture = null;
+  if (wasDrag) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    saveOrbPos({ fx: rect.x / window.innerWidth, fy: rect.y / window.innerHeight });
+  } else {
+    // 点击圆球 → 展开面板
+    expandPanel();
+  }
+}
+
+function positionOrb(fx, fy) {
+  if (!orbEl) return;
+  fx = Math.max(0, Math.min(0.92, fx));
+  fy = Math.max(0.04, Math.min(0.92, fy));
+  orbEl.style.left = (fx * window.innerWidth) + 'px';
+  orbEl.style.top = (fy * window.innerHeight) + 'px';
+}
+
+function loadOrbPos() {
+  try {
+    const raw = localStorage.getItem(ORB_POS_KEY);
+    if (raw) {
+      const d = JSON.parse(raw);
+      if (typeof d.fx === 'number' && typeof d.fy === 'number') return d;
+    }
+  } catch (_) {}
+  return { fx: 0.86, fy: 0.72 };  // 默认停右下角，避开顶栏和中间内容
+}
+
+function saveOrbPos(pos) {
+  try { localStorage.setItem(ORB_POS_KEY, JSON.stringify(pos)); } catch (_) {}
+}
+
+function showOrb() { ensureOrb().style.display = 'flex'; }
+function hideOrb() { if (orbEl) orbEl.style.display = 'none'; }
+
+/* ============ 面板（展开态） ============ */
 
 function ensurePanel() {
   if (panelEl && document.body.contains(panelEl)) return panelEl;
@@ -75,8 +182,6 @@ function ensurePanel() {
   return panelEl;
 }
 
-/* ============ 骨架 ============ */
-
 function renderShell() {
   return `
     <div class="cssw-header">
@@ -86,13 +191,14 @@ function renderShell() {
           <option value="frosted">磨砂</option>
           <option value="claude">Claude</option>
         </select>
+        <button type="button" class="cssw-min" title="收起成小球">－</button>
         <button type="button" class="cssw-close" title="关闭">✕</button>
       </div>
     </div>
     <div class="cssw-body">
       <div class="cssw-step cssw-step-pick">
         <button type="button" class="cssw-pick-btn">🎯 点选界面上要改的地方</button>
-        <p class="cssw-tip">点一下按钮，然后去点消息气泡、头像、输入框……任意位置。</p>
+        <p class="cssw-tip">点按钮后去点任意位置。要改展开面板里的东西（如角色头像），先展开它再点选。</p>
       </div>
       <div class="cssw-step cssw-step-area" hidden></div>
       <div class="cssw-step cssw-step-what" hidden></div>
@@ -104,6 +210,7 @@ function renderShell() {
 
 function bindShellEvents() {
   panelEl.querySelector('.cssw-close').addEventListener('click', closePanel);
+  panelEl.querySelector('.cssw-min').addEventListener('click', collapseToOrb);
 
   const skinSel = panelEl.querySelector('.cssw-skin-select');
   skinSel.value = currentSkin;
@@ -114,20 +221,39 @@ function bindShellEvents() {
   });
 
   panelEl.querySelector('.cssw-pick-btn').addEventListener('click', onPickClick);
+
+  // ★ 防抽屉收起：面板吞掉自己的 click + mousedown
+  panelEl.addEventListener('click', (e) => e.stopPropagation());
+  panelEl.addEventListener('mousedown', (e) => e.stopPropagation());
 }
 
-/* ============ 打开 / 关闭 ============ */
+/* ============ 两态切换 ============ */
 
+// 外部入口（魔棒菜单点击）：默认展开面板
 function openPanel() {
+  expandPanel();
+}
+
+// 展开：显示面板，隐藏圆球
+function expandPanel() {
   ensurePanel();
   applySkin();
   panelEl.querySelector('.cssw-skin-select').value = currentSkin;
   panelEl.setAttribute('data-open', 'true');
+  hideOrb();
 }
 
+// 收起成圆球：隐藏面板，显示圆球
+function collapseToOrb() {
+  if (panelEl) panelEl.setAttribute('data-open', 'false');
+  showOrb();
+}
+
+// 关闭：面板和圆球都收起（回到魔棒菜单入口）
 function closePanel() {
   if (isPicking()) exitPickMode();
   if (panelEl) panelEl.setAttribute('data-open', 'false');
+  hideOrb();
 }
 
 /* ============ 点选 ============ */
@@ -135,19 +261,36 @@ function closePanel() {
 function onPickClick() {
   if (isPicking()) {
     exitPickMode();
+    onPickModeExit();
     return;
   }
+  // 进入选择模式：面板收成圆球让位 + 圆球脉冲反馈
   enterPickMode((el) => {
+    onPickModeExit();
     onElementPicked(el);
   });
+  onPickModeEnter();
+}
+
+// 进入选择模式：面板缩成圆球并高亮脉冲，让出视线
+function onPickModeEnter() {
+  if (panelEl) panelEl.setAttribute('data-open', 'false');
+  showOrb();
+  if (orbEl) orbEl.classList.add('cssw-orb-picking');
+}
+
+// 退出选择模式：去掉圆球脉冲
+function onPickModeExit() {
+  if (orbEl) orbEl.classList.remove('cssw-orb-picking');
 }
 
 function onElementPicked(el) {
   currentTarget = el;
   containerChain = getContainerChain(el);
   chainIndex = 0;
-  // 重置后续选择
   sel = { whatKey: null, whatLabel: null, howKey: null, howLabel: null, customText: '' };
+  // 选完自动展开面板到结果
+  expandPanel();
   renderArea();
   renderWhat();
   hideStep('.cssw-step-how');
@@ -241,7 +384,6 @@ function renderHow() {
 
   customBox.addEventListener('input', () => {
     sel.customText = customBox.value;
-    // 有自定义文字时也能直接生成
     genBtn.disabled = !(sel.howKey || customBox.value.trim());
   });
 
@@ -257,7 +399,7 @@ function onGenerate() {
   const info = identify(el);
   let analysis;
   try {
-    analysis = analyze(el, sel.whatKey);   // 当场读 CSS，看完即焚；按"改什么"过滤属性
+    analysis = analyze(el, sel.whatKey);
   } catch (e) {
     console.error('[css-whisperer] 分析失败', e);
     analysis = { relevantRules: [], pseudo: [], variables: [], computed: {}, authoredHere: false, partialUnreadable: true };
@@ -290,15 +432,11 @@ function renderResult(text) {
     copyText(text);
   });
 
-  // 滚到结果
   step.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 /* ============ 工具 ============ */
 
-/**
- * 从元素提取定位信息（情形 B 用）——纯运行时结构，不持久化
- */
 function buildLocator(el, standardSelector) {
   const classes = [];
   try {
