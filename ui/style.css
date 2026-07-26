@@ -1,0 +1,415 @@
+/* 点问 CSS Whisperer — 面板样式
+ * 皮肤变量沿用 theme-tap 的双皮肤设计（磨砂 / Claude），--tt-* 命名保持一致。 */
+
+/* ========================================
+ * 皮肤变量
+ * ======================================== */
+.cssw-skin-frosted {
+  --tt-bg-solid: rgba(248, 248, 248, 0.92);
+  --tt-text: #3a3a3a;
+  --tt-text-secondary: #666;
+  --tt-text-tertiary: #999;
+  --tt-border: rgba(220, 220, 220, 0.6);
+  --tt-card-bg: rgba(255, 255, 255, 0.55);
+  --tt-input-bg: rgba(255, 255, 255, 0.6);
+  --tt-accent: #5a5a5a;
+  --tt-accent-hover: #444;
+  --tt-success: #5a8a5a;
+  --tt-danger: #c15f3c;
+  --tt-shadow: 0 4px 20px rgba(100, 116, 139, 0.12);
+  --tt-shadow-strong: 0 8px 28px rgba(100, 116, 139, 0.18);
+  --tt-radius: 14px;
+  --tt-radius-card: 10px;
+  --tt-radius-btn: 8px;
+  --tt-blur: blur(20px) saturate(120%);
+}
+
+.cssw-skin-claude {
+  --tt-bg-solid: #faf9f5;
+  --tt-text: #2d2a26;
+  --tt-text-secondary: #6b6757;
+  --tt-text-tertiary: #9b9788;
+  --tt-border: #e8e4d9;
+  --tt-card-bg: #ffffff;
+  --tt-input-bg: #ffffff;
+  --tt-accent: #d97757;
+  --tt-accent-hover: #c4663f;
+  --tt-success: #5a8a5a;
+  --tt-danger: #c15f3c;
+  --tt-shadow: 0 2px 8px rgba(45, 42, 38, 0.06);
+  --tt-shadow-strong: 0 4px 16px rgba(45, 42, 38, 0.12);
+  --tt-radius: 14px;
+  --tt-radius-card: 10px;
+  --tt-radius-btn: 8px;
+  --tt-blur: none;
+}
+
+/* ========================================
+ * 面板容器（底部抽屉，双端自适应）
+ * ======================================== */
+.cssw-panel {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 420px;
+  max-width: 100vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--tt-bg-solid);
+  backdrop-filter: var(--tt-blur);
+  -webkit-backdrop-filter: var(--tt-blur);
+  color: var(--tt-text);
+  border: 1px solid var(--tt-border);
+  border-bottom: none;
+  border-radius: var(--tt-radius) var(--tt-radius) 0 0;
+  box-shadow: var(--tt-shadow-strong);
+  z-index: 100001;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+}
+
+.cssw-panel[data-open="false"] {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .cssw-panel {
+    width: 100vw;
+    max-height: 85vh;
+    border-radius: var(--tt-radius) var(--tt-radius) 0 0;
+  }
+}
+
+/* ========================================
+ * 头部
+ * ======================================== */
+.cssw-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--tt-border);
+  cursor: default;
+}
+
+.cssw-title {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--tt-text);
+}
+
+.cssw-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cssw-skin-select {
+  height: 30px;
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-btn);
+  background: var(--tt-input-bg);
+  color: var(--tt-text);
+  padding: 0 8px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.cssw-close {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--tt-text-secondary);
+  cursor: pointer;
+  font-size: 18px;
+  border-radius: var(--tt-radius-btn);
+  transition: background 0.15s;
+}
+.cssw-close:hover { background: rgba(128, 128, 128, 0.12); }
+
+/* ========================================
+ * 主体（滚动区）
+ * ======================================== */
+.cssw-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  -webkit-overflow-scrolling: touch;
+}
+
+.cssw-step {
+  margin-bottom: 16px;
+}
+.cssw-step:last-child { margin-bottom: 0; }
+
+/* ========================================
+ * 点选按钮
+ * ======================================== */
+.cssw-pick-btn {
+  width: 100%;
+  min-height: 48px;
+  padding: 12px;
+  background: var(--tt-accent);
+  color: #fff;
+  border: 1px solid var(--tt-accent);
+  border-radius: var(--tt-radius-btn);
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+.cssw-pick-btn:hover { background: var(--tt-accent-hover); }
+.cssw-pick-btn:active { transform: scale(0.98); }
+
+.cssw-tip {
+  margin: 8px 2px 0;
+  font-size: 12px;
+  color: var(--tt-text-tertiary);
+  line-height: 1.4;
+}
+
+/* ========================================
+ * 区域名 + 层级链
+ * ======================================== */
+.cssw-area-name {
+  font-size: 16px;
+  color: var(--tt-text);
+  padding: 4px 2px;
+}
+.cssw-area-name b {
+  font-size: 18px;
+  color: var(--tt-accent);
+}
+
+.cssw-chain {
+  margin-top: 8px;
+}
+.cssw-chain-hint {
+  font-size: 12px;
+  color: var(--tt-text-tertiary);
+  margin-bottom: 4px;
+}
+.cssw-chain-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cssw-chain-item {
+  padding: 5px 10px;
+  background: var(--tt-card-bg);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-btn);
+  color: var(--tt-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+.cssw-chain-item:hover { background: rgba(128, 128, 128, 0.1); }
+.cssw-chain-item.active {
+  background: var(--tt-accent);
+  border-color: var(--tt-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.cssw-repick {
+  margin-top: 10px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-btn);
+  color: var(--tt-text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+}
+.cssw-repick:hover { background: rgba(128, 128, 128, 0.1); }
+
+/* ========================================
+ * 问答（改什么 / 怎么改）
+ * ======================================== */
+.cssw-q {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tt-text);
+  margin-bottom: 8px;
+}
+
+.cssw-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.cssw-opt {
+  flex: 1 1 auto;
+  min-width: 72px;
+  min-height: 42px;
+  padding: 8px 14px;
+  background: var(--tt-card-bg);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-btn);
+  color: var(--tt-text);
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.cssw-opt:hover { background: rgba(128, 128, 128, 0.1); }
+.cssw-opt:active { transform: scale(0.97); }
+.cssw-opt.active {
+  background: var(--tt-accent);
+  border-color: var(--tt-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.cssw-custom {
+  width: 100%;
+  min-height: 60px;
+  padding: 10px;
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-card);
+  background: var(--tt-input-bg);
+  color: var(--tt-text);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+}
+
+.cssw-gen-btn {
+  width: 100%;
+  min-height: 46px;
+  background: var(--tt-accent);
+  color: #fff;
+  border: 1px solid var(--tt-accent);
+  border-radius: var(--tt-radius-btn);
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.cssw-gen-btn:hover:not(:disabled) { background: var(--tt-accent-hover); }
+.cssw-gen-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ========================================
+ * 结果区
+ * ======================================== */
+.cssw-result-text {
+  width: 100%;
+  min-height: 200px;
+  padding: 12px;
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-card);
+  background: var(--tt-input-bg);
+  color: var(--tt-text);
+  font-size: 12.5px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+  white-space: pre;
+}
+
+.cssw-copy-btn {
+  width: 100%;
+  min-height: 46px;
+  background: var(--tt-success);
+  color: #fff;
+  border: 1px solid var(--tt-success);
+  border-radius: var(--tt-radius-btn);
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.cssw-copy-btn:active { transform: scale(0.98); }
+
+/* ========================================
+ * 拾取状态条
+ * ======================================== */
+.cssw-status-bar {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: #d97757;
+  color: #fff !important;
+  border-radius: 24px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  z-index: 100004;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  animation: cssw-status-pulse 2s ease-in-out infinite;
+}
+@keyframes cssw-status-pulse {
+  0%, 100% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); }
+  50% { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3); }
+}
+.cssw-status-icon { font-size: 16px; }
+.cssw-status-text { flex: 1; }
+.cssw-status-cancel {
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: #fff !important;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.cssw-status-cancel:hover { background: rgba(255, 255, 255, 0.3); }
+
+/* ========================================
+ * 高亮层
+ * ======================================== */
+.cssw-highlight-layer {
+  position: absolute;
+  border: 2px solid #d97757;
+  background: rgba(217, 119, 87, 0.15);
+  pointer-events: none;
+  z-index: 99999;
+  border-radius: 2px;
+  transition: top 0.05s, left 0.05s, width 0.05s, height 0.05s;
+}
+
+/* ========================================
+ * 拾取模式光标
+ * ======================================== */
+body.cssw-picking { cursor: crosshair !important; }
+body.cssw-picking * { cursor: crosshair !important; }
+body.cssw-picking .cssw-status-bar,
+body.cssw-picking .cssw-status-bar * { cursor: default !important; }
+body.cssw-picking .cssw-status-cancel { cursor: pointer !important; }
+
+/* ========================================
+ * 滚动条
+ * ======================================== */
+.cssw-body::-webkit-scrollbar { width: 6px; }
+.cssw-body::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.3);
+  border-radius: 3px;
+}
+.cssw-body::-webkit-scrollbar-track { background: transparent; }
