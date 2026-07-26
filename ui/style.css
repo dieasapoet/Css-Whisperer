@@ -306,19 +306,69 @@
   color: var(--tt-text-tertiary);
   font-variant-numeric: tabular-nums;
 }
-.cssw-editor-textarea {
+/* 撤回/重置 */
+.cssw-editor-actions { display: flex; gap: 6px; margin-bottom: 8px; }
+.cssw-editor-undo, .cssw-editor-reset {
+  flex: 1;
+  height: 34px;
+  background: transparent;
+  color: var(--tt-text);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-btn);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.cssw-editor-undo:hover:not(:disabled), .cssw-editor-reset:hover { background: rgba(128, 128, 128, 0.12); }
+.cssw-editor-undo:disabled { opacity: 0.4; cursor: not-allowed; }
+.cssw-editor-reset { color: var(--tt-danger); border-color: var(--tt-danger); }
+
+/* 编辑框 + 搜索高亮层（highlight 铺在 textarea 背后，textarea 背景透明）
+ * 两者字体/行高/padding 必须完全一致，文字才对齐。 */
+.cssw-editor-wrap {
+  position: relative;
   width: 100%;
   min-height: 220px;
+}
+.cssw-editor-highlight,
+.cssw-editor-textarea {
+  margin: 0;
   padding: 10px;
   border: 1px solid var(--tt-border);
   border-radius: var(--tt-radius-card);
-  background: var(--tt-input-bg);
-  color: var(--tt-text);
   font-size: 12.5px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   line-height: 1.5;
-  resize: vertical;
   box-sizing: border-box;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.cssw-editor-highlight {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  color: transparent;
+  background: var(--tt-input-bg);
+  pointer-events: none;
+  z-index: 0;
+}
+.cssw-editor-highlight .cssw-hl {
+  background: rgba(217, 119, 87, 0.35);
+  color: transparent;
+  border-radius: 2px;
+}
+.cssw-editor-textarea {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  min-height: 220px;
+  height: 100%;
+  color: var(--tt-text);
+  background: transparent;
+  resize: vertical;
 }
 .cssw-editor-hint {
   margin-top: 6px;
@@ -330,27 +380,33 @@
 .cssw-chain {
   margin-top: 8px;
 }
-.cssw-chain-hint {
+.cssw-chain-tip {
   font-size: 12px;
   color: var(--tt-text-tertiary);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 .cssw-chain-list {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
 }
 .cssw-chain-item {
-  padding: 5px 10px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
   background: var(--tt-card-bg);
   border: 1px solid var(--tt-border);
   border-radius: var(--tt-radius-btn);
   color: var(--tt-text);
   cursor: pointer;
-  font-size: 12px;
   font-family: inherit;
   transition: background 0.15s, border-color 0.15s;
 }
+.cssw-chain-nm { flex: 0 0 auto; font-size: 13px; font-weight: 600; }
+.cssw-chain-note { flex: 1; font-size: 11px; color: var(--tt-text-tertiary); }
 .cssw-chain-item:hover { background: rgba(128, 128, 128, 0.1); }
 .cssw-chain-item.active {
   background: var(--tt-accent);
@@ -518,7 +574,9 @@
   resize: vertical;
   box-sizing: border-box;
   margin-bottom: 10px;
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .cssw-copy-btn {
@@ -595,6 +653,23 @@
   z-index: 99999;
   border-radius: 2px;
   transition: top 0.05s, left 0.05s, width 0.05s, height 0.05s;
+}
+
+/* 当前正在改的元素——持续高亮（醒目描边+脉冲），让用户始终看清在改哪 */
+.cssw-persist-highlight {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+  z-index: 99998;
+  border: 2px dashed #d97757;
+  background: rgba(217, 119, 87, 0.10);
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.25);
+  animation: cssw-persist-pulse 1.6s ease-in-out infinite;
+}
+@keyframes cssw-persist-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.25); }
+  50% { box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.12); }
 }
 
 /* ========================================

@@ -193,10 +193,11 @@ function expandPanel() {
   panelEl.setAttribute('data-open', 'true');
   hideOrb();
 }
-function collapseToOrb() { if (panelEl) panelEl.setAttribute('data-open', 'false'); showOrb(); }
+function collapseToOrb() { if (panelEl) panelEl.setAttribute('data-open', 'false'); hidePersistentHighlight(); showOrb(); }
 function closePanel() {
   if (isPicking()) exitPickMode();
   if (panelEl) panelEl.setAttribute('data-open', 'false');
+  hidePersistentHighlight();
   hideOrb();
 }
 
@@ -208,6 +209,7 @@ function onPickClick() {
 }
 function onPickModeEnter() {
   if (panelEl) panelEl.setAttribute('data-open', 'false');
+  hidePersistentHighlight();
   showOrb();
   if (orbEl) orbEl.classList.add('cssw-orb-picking');
 }
@@ -235,6 +237,7 @@ function toggleEditor() {
   if (!nativeExists()) { showToast('找不到 SillyTavern 的自定义CSS框，请先打开一次「用户设置」'); return; }
   // 打开编辑器 → 收起区域/问答/结果模块，让用户专注改代码
   hideStep('.cssw-step-area'); hideStep('.cssw-step-what'); hideStep('.cssw-step-result');
+  hidePersistentHighlight();
   const empty = panelEl.querySelector('.cssw-empty'); if (empty) empty.hidden = true;
   renderEditor();
   editorOpen = true;
@@ -249,25 +252,66 @@ function renderEditor() {
       <button type="button" class="cssw-editor-next" title="下一个">▼</button>
       <span class="cssw-editor-count">0/0</span>
     </div>
-    <textarea class="cssw-editor-textarea" spellcheck="false"></textarea>
+    <div class="cssw-editor-actions">
+      <button type="button" class="cssw-editor-undo" disabled>↶ 撤回</button>
+      <button type="button" class="cssw-editor-reset">⟲ 重置（恢复打开时）</button>
+    </div>
+    <div class="cssw-editor-wrap">
+      <div class="cssw-editor-highlight" aria-hidden="true"></div>
+      <textarea class="cssw-editor-textarea" spellcheck="false"></textarea>
+    </div>
   `;
   step.hidden = false;
 
   const ta = step.querySelector('.cssw-editor-textarea');
+  const hl = step.querySelector('.cssw-editor-highlight');
   const searchBox = step.querySelector('.cssw-editor-search');
   const prevBtn = step.querySelector('.cssw-editor-prev');
   const nextBtn = step.querySelector('.cssw-editor-next');
   const countEl = step.querySelector('.cssw-editor-count');
+  const undoBtn = step.querySelector('.cssw-editor-undo');
+  const resetBtn = step.querySelector('.cssw-editor-reset');
 
   ta.value = readNativeCSS();
 
+  // 撤回/重置：打开时记原始快照；每次写回前把旧值压入 undo 栈
+  const openBackup = ta.value;
+  const undoStack = [];
+  const pushUndo = (v) => { undoStack.push(v); if (undoStack.length > 50) undoStack.shift(); undoBtn.disabled = undoStack.length === 0; };
+
   let saveTimer = null;
+  let lastSaved = ta.value;
   ta.addEventListener('input', () => {
     if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => writeNativeCSS(ta.value), 400);
+    saveTimer = setTimeout(() => {
+      pushUndo(lastSaved);       // 存"改动前"的值，撤回时回到它
+      lastSaved = ta.value;
+      writeNativeCSS(ta.value);
+      renderHighlight();
+    }, 400);
+    renderHighlight();
   });
 
-  // 搜索：计算所有匹配位置，支持上一个/下一个 + 计数
+  undoBtn.addEventListener('click', () => {
+    if (!undoStack.length) return;
+    const prev = undoStack.pop();
+    ta.value = prev;
+    lastSaved = prev;
+    writeNativeCSS(prev);
+    undoBtn.disabled = undoStack.length === 0;
+    recompute();
+    showToast('已撤回一步');
+  });
+  resetBtn.addEventListener('click', () => {
+    pushUndo(lastSaved);
+    ta.value = openBackup;
+    lastSaved = openBackup;
+    writeNativeCSS(openBackup);
+    recompute();
+    showToast('已恢复到打开编辑器时的样子');
+  });
+
+  // ===== 搜索：计数 + 上/下一个 + 全部高亮 =====
   let matches = [];
   let cur = -1;
   const recompute = () => {
@@ -279,6 +323,7 @@ function renderEditor() {
     }
     cur = matches.length ? 0 : -1;
     updateCount();
+    renderHighlight();
     if (cur >= 0) jump();
   };
   const updateCount = () => { countEl.textContent = matches.length ? `${cur + 1}/${matches.length}` : '0/0'; };
@@ -287,21 +332,44 @@ function renderEditor() {
     const idx = matches[cur];
     ta.focus();
     ta.setSelectionRange(idx, idx + kw.length);
-    // 粗略滚动到选中行
     const before = ta.value.slice(0, idx);
     const line = before.split('\n').length - 1;
     const lh = parseFloat(getComputedStyle(ta).lineHeight) || 18;
     ta.scrollTop = Math.max(0, line * lh - ta.clientHeight / 2);
+    syncHighlightScroll();
   };
   const step2 = (d) => {
     if (!matches.length) return;
     cur = (cur + d + matches.length) % matches.length;
     updateCount(); jump();
   };
+
+  // 高亮层：把匹配词包 <mark>，铺在 textarea 背后（textarea 背景透明）
+  const renderHighlight = () => {
+    const kw = searchBox.value;
+    const text = ta.value;
+    if (!kw) { hl.innerHTML = escapeHtml(text); syncHighlightScroll(); return; }
+    let out = '';
+    let i = 0;
+    while (true) {
+      const j = text.indexOf(kw, i);
+      if (j === -1) { out += escapeHtml(text.slice(i)); break; }
+      out += escapeHtml(text.slice(i, j));
+      out += '<mark class="cssw-hl">' + escapeHtml(kw) + '</mark>';
+      i = j + kw.length;
+    }
+    hl.innerHTML = out;
+    syncHighlightScroll();
+  };
+  const syncHighlightScroll = () => { hl.scrollTop = ta.scrollTop; hl.scrollLeft = ta.scrollLeft; };
+  ta.addEventListener('scroll', syncHighlightScroll);
+
   searchBox.addEventListener('input', recompute);
   searchBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); step2(1); } });
   nextBtn.addEventListener('click', () => step2(1));
   prevBtn.addEventListener('click', () => step2(-1));
+
+  renderHighlight();
 }
 
 /* ============ 区域（层级链，直接显示区域名，不要"选大选小") ============ */
@@ -313,27 +381,62 @@ function renderArea() {
   let chainButtons = '';
   if (containerChain.length > 1) {
     chainButtons = containerChain.map((node, i) => {
-      const nm = identify(node).name;
+      const ci = identify(node);
+      const noteHtml = ci.note ? `<span class="cssw-chain-note">${escapeHtml(ci.note)}</span>` : '';
       const active = i === chainIndex ? ' active' : '';
-      return `<button type="button" class="cssw-chain-item${active}" data-idx="${i}">${escapeHtml(nm)}</button>`;
+      return `<button type="button" class="cssw-chain-item${active}" data-idx="${i}"><span class="cssw-chain-nm">${escapeHtml(ci.name)}</span>${noteHtml}</button>`;
     }).join('');
-    chainButtons = `<div class="cssw-chain"><div class="cssw-chain-list">${chainButtons}</div></div>`;
+    chainButtons = `<div class="cssw-chain"><div class="cssw-chain-tip">这里有好几层，选你要改的那层：</div><div class="cssw-chain-list">${chainButtons}</div></div>`;
   }
 
   const note = info.note ? `<span class="cssw-area-note">${escapeHtml(info.note)}</span>` : '';
   step.innerHTML = `
-    <div class="cssw-area-name"><b>${escapeHtml(info.name)}</b>${note}</div>
+    <div class="cssw-area-name">正在改：<b>${escapeHtml(info.name)}</b>${note}</div>
     ${chainButtons}
   `;
   step.hidden = false;
+
+  // 持续高亮当前选中的元素（不只是点选瞬间），让用户始终看清在改哪
+  showPersistentHighlight(el);
 
   step.querySelectorAll('.cssw-chain-item').forEach((btn) => {
     btn.addEventListener('click', () => {
       chainIndex = parseInt(btn.getAttribute('data-idx'), 10) || 0;
       renderArea();
-      renderWhat();  // 换了元素，诉求下的"怎么改"不变，但重渲染保持一致
+      renderWhat();
     });
   });
+}
+
+/* ============ 当前选中元素持续高亮 ============ */
+let persistHlEl = null;
+let persistTarget = null;
+let persistRaf = null;
+
+function showPersistentHighlight(el) {
+  persistTarget = el;
+  if (!persistHlEl) {
+    persistHlEl = document.createElement('div');
+    persistHlEl.className = 'cssw-persist-highlight';
+    document.body.appendChild(persistHlEl);
+  }
+  const update = () => {
+    if (!persistTarget || !document.body.contains(persistTarget)) { hidePersistentHighlight(); return; }
+    const r = persistTarget.getBoundingClientRect();
+    persistHlEl.style.display = 'block';
+    persistHlEl.style.top = (r.top + window.scrollY) + 'px';
+    persistHlEl.style.left = (r.left + window.scrollX) + 'px';
+    persistHlEl.style.width = r.width + 'px';
+    persistHlEl.style.height = r.height + 'px';
+    persistRaf = requestAnimationFrame(update);
+  };
+  cancelAnimationFrame(persistRaf);
+  update();
+}
+function hidePersistentHighlight() {
+  persistTarget = null;
+  cancelAnimationFrame(persistRaf);
+  if (persistHlEl) persistHlEl.style.display = 'none';
 }
 
 /* ============ 改什么（多选 chip） + 每项的怎么改 ============ */
