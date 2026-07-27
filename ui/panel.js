@@ -18,7 +18,7 @@
 import { enterPickMode, exitPickMode, isPicking, getContainerChain, showToast } from '../src/picker.js';
 import { identify } from '../src/semantic.js';
 import { analyze } from '../src/analyzer.js';
-import { WHAT_OPTIONS, getHowOptions, buildPrompt, buildMultiPrompt } from '../src/prompt-builder.js';
+import { buildPrompt } from '../src/prompt-builder.js';
 import { readNativeCSS, writeNativeCSS, nativeExists } from '../src/editor.js';
 
 const PANEL_ID = 'cssw-panel';
@@ -41,11 +41,9 @@ let editorOpen = false;
 let containerChain = [];
 let chainIndex = 0;
 let currentTarget = null;
-// 多选诉求：{ [whatKey]: { whatLabel, howKey, howLabel } }
-let intents = {};
-let extraText = '';
-// 购物车：多个区域的诉求，每项 { areaName, intents:[], analysis, locator }
-let cart = [];
+let userText = '';        // 用户一句话诉求（自由输入）
+let lastAnalysis = null;  // 当前元素现状 { computed, pseudo }
+let lastSelector = '';    // 当前元素精确选择器
 
 /* ============ 皮肤 ============ */
 function getSkinClass() { return currentSkin === 'claude' ? SKIN_CLAUDE : SKIN_FROSTED; }
@@ -145,7 +143,6 @@ function renderShell() {
     <div class="cssw-toolbar">
       <button type="button" class="cssw-tb cssw-tb-pick" title="点选界面上要改的地方">🎯</button>
       <button type="button" class="cssw-tb cssw-tb-editor" title="打开自定义CSS编辑框（搜索/粘贴/保存）">✏️</button>
-      <button type="button" class="cssw-tb cssw-tb-cart" title="修改清单">🧺<span class="cssw-cart-badge" hidden>0</span></button>
       <span class="cssw-tb-title">点问</span>
       <select class="cssw-skin-select cssw-tb-skin" title="面板皮肤">
         <option value="frosted">磨砂</option>
@@ -155,16 +152,13 @@ function renderShell() {
       <button type="button" class="cssw-tb cssw-close" title="关闭">✕</button>
     </div>
     <div class="cssw-body">
-      <div class="cssw-step cssw-step-editor" hidden></div>
-      <div class="cssw-step cssw-step-cart" hidden></div>
       <div class="cssw-step cssw-step-area" hidden></div>
-      <div class="cssw-step cssw-step-what" hidden></div>
+      <div class="cssw-step cssw-step-editor" hidden></div>
       <div class="cssw-step cssw-step-result" hidden></div>
       <div class="cssw-empty">点顶部 🎯 开始：先点界面上想改的地方。</div>
     </div>
     <div class="cssw-footer" hidden>
-      <button type="button" class="cssw-add-btn" disabled>➕ 加入清单，再改下一处</button>
-      <button type="button" class="cssw-gen-btn">生成提问</button>
+      <button type="button" class="cssw-gen-btn">生成提问问 AI</button>
     </div>
   `;
 }
@@ -173,10 +167,8 @@ function bindShellEvents() {
   panelEl.querySelector('.cssw-close').addEventListener('click', closePanel);
   panelEl.querySelector('.cssw-min').addEventListener('click', collapseToOrb);
   panelEl.querySelector('.cssw-tb-pick').addEventListener('click', onPickClick);
-  panelEl.querySelector('.cssw-tb-editor').addEventListener('click', toggleEditor);
-  panelEl.querySelector('.cssw-tb-cart').addEventListener('click', toggleCart);
-  // 固定底部操作条（sticky footer）：加入清单 / 生成提问
-  panelEl.querySelector('.cssw-footer .cssw-add-btn').addEventListener('click', addCurrentToCart);
+  panelEl.querySelector('.cssw-tb-editor').addEventListener('click', () => toggleEditor());
+  // 固定底部操作条：生成提问
   panelEl.querySelector('.cssw-footer .cssw-gen-btn').addEventListener('click', onGenerate);
   const skinSel = panelEl.querySelector('.cssw-skin-select');
   skinSel.value = currentSkin;
@@ -198,25 +190,14 @@ function bindShellEvents() {
 }
 
 /* ============ 固定底部操作条（footer） ============
- * 只在"选好元素、正在选部位"这一步显示；编辑器/购物车/纯结果态隐藏，
- * 避免没选元素就先摆两个大按钮（视觉修 #3 的门控）。*/
+ * 只在"选好元素"时显示；编辑器/纯结果态隐藏。*/
 function showFooter() {
   const f = panelEl && panelEl.querySelector('.cssw-footer');
   if (f) f.hidden = false;
-  updateFooter();
 }
 function hideFooter() {
   const f = panelEl && panelEl.querySelector('.cssw-footer');
   if (f) f.hidden = true;
-}
-// 按当前状态刷新 footer 按钮（加入清单是否可用、生成按钮文案带清单计数）
-function updateFooter() {
-  if (!panelEl) return;
-  const addBtn = panelEl.querySelector('.cssw-footer .cssw-add-btn');
-  const genBtn = panelEl.querySelector('.cssw-footer .cssw-gen-btn');
-  if (!addBtn || !genBtn) return;
-  addBtn.disabled = !Object.keys(intents).length;
-  genBtn.textContent = cart.length ? `生成提问（清单 ${cart.length} 处 + 当前）` : '生成提问';
 }
 
 /* ============ 面板拖动 + 尺寸/位置记忆 ============ */
@@ -353,17 +334,16 @@ function onElementPicked(el) {
   currentTarget = el;
   containerChain = getContainerChain(el);
   chainIndex = 0;
-  intents = {};
-  extraText = '';
+  userText = '';
   editorOpen = false;
   hideStep('.cssw-step-editor');
-  hideStep('.cssw-step-cart');
+  hideStep('.cssw-step-result');
   const empty = panelEl.querySelector('.cssw-empty'); if (empty) empty.hidden = true;
   expandPanel();
-  renderArea();
-  renderWhat();
-  hideStep('.cssw-step-result');
+  renderArea();       // 显示：区域名 + 精确选择器(可复制) + 现状 + 层级链 + 诉求输入框
   showFooter();
+  // 默认打开编辑器并定位到该元素相关那段（会改的人当场改）
+  openEditorAndLocate();
 }
 
 /* ============ CSS 编辑框 ============ */
@@ -371,17 +351,20 @@ function toggleEditor() {
   const step = panelEl.querySelector('.cssw-step-editor');
   if (editorOpen) { step.hidden = true; step.innerHTML = ''; editorOpen = false; return; }
   if (!nativeExists()) { showToast('找不到 SillyTavern 的自定义CSS框，请先打开一次「用户设置」'); return; }
-  // 打开编辑器 → 收起区域/问答/结果模块 + 底部操作条，让用户专注改代码
-  hideStep('.cssw-step-area'); hideStep('.cssw-step-what'); hideStep('.cssw-step-result');
-  hideStep('.cssw-step-cart');
-  hideFooter();
-  hidePersistentHighlight();
   const empty = panelEl.querySelector('.cssw-empty'); if (empty) empty.hidden = true;
   renderEditor();
   editorOpen = true;
 }
 
-async function renderEditor() {
+// 点选后默认调用：打开编辑器，并尝试定位到当前元素相关那段（搜到→跳转高亮；搜不到→面板提示，不写入）
+function openEditorAndLocate() {
+  if (!nativeExists()) return;  // 没有 #customCSS 框就跳过，area 仍显示
+  const empty = panelEl.querySelector('.cssw-empty'); if (empty) empty.hidden = true;
+  renderEditor(lastSelector);
+  editorOpen = true;
+}
+
+async function renderEditor(locateSelector) {
   const step = panelEl.querySelector('.cssw-step-editor');
   step.innerHTML = `
     <div class="cssw-editor-searchrow">
@@ -399,12 +382,15 @@ async function renderEditor() {
       <button type="button" class="cssw-editor-reset">⟲ 重置</button>
     </div>
     <div class="cssw-editor-host">
+      <pre class="cssw-editor-highlight" aria-hidden="true"><code class="language-css"></code></pre>
       <textarea class="cssw-editor-textarea" spellcheck="false"></textarea>
     </div>
   `;
   step.hidden = false;
 
   const ta = step.querySelector('.cssw-editor-textarea');
+  const hlPre = step.querySelector('.cssw-editor-highlight');
+  const hlCode = hlPre ? hlPre.querySelector('code') : null;
   const searchBox = step.querySelector('.cssw-editor-search');
   const prevBtn = step.querySelector('.cssw-editor-prev');
   const nextBtn = step.querySelector('.cssw-editor-next');
@@ -420,9 +406,26 @@ async function renderEditor() {
   const openBackup = readNativeCSS();
   ta.value = openBackup;
 
+  // ---- hljs 语法高亮叠层（ST 内置 window.hljs，不抢全局；缺失则降级为纯 textarea）----
+  const hasHljs = !!(window.hljs && typeof window.hljs.highlight === 'function');
+  if (!hasHljs && hlPre) hlPre.style.display = 'none';  // 无 hljs：藏掉高亮层，textarea 变不透明(靠 CSS)
+  const syncHighlight = () => {
+    if (!hasHljs || !hlCode) return;
+    let html;
+    try { html = window.hljs.highlight(ta.value, { language: 'css' }).value; }
+    catch (_) { html = escapeHtml(ta.value); }
+    // 结尾换行不渲染，补一个占位，保证末行高度对齐
+    hlCode.innerHTML = html + '\n';
+    hlPre.scrollTop = ta.scrollTop;
+    hlPre.scrollLeft = ta.scrollLeft;
+  };
+  step.classList.toggle('cssw-editor-has-hl', hasHljs);
+
   // 防抽屉/防冒泡：编辑区自己的事件不外泄
   ta.addEventListener('mousedown', (e) => e.stopPropagation());
   ta.addEventListener('pointerdown', (e) => e.stopPropagation());
+  // 高亮层跟随滚动
+  ta.addEventListener('scroll', () => { if (hlPre) { hlPre.scrollTop = ta.scrollTop; hlPre.scrollLeft = ta.scrollLeft; } });
 
   // ---- 撤回/重做：快照栈（编辑防抖后压栈）----
   const undoStack = [];
@@ -430,6 +433,7 @@ async function renderEditor() {
   let lastSnapshot = ta.value;
   let saveTimer = null;
   ta.addEventListener('input', () => {
+    syncHighlight();
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       undoStack.push(lastSnapshot);
@@ -443,18 +447,18 @@ async function renderEditor() {
     if (!undoStack.length) return;
     redoStack.push(ta.value);
     const v = undoStack.pop();
-    ta.value = v; lastSnapshot = v; writeNativeCSS(v); refreshCount();
+    ta.value = v; lastSnapshot = v; writeNativeCSS(v); syncHighlight(); refreshCount();
   });
   redoBtn.addEventListener('click', () => {
     if (!redoStack.length) return;
     undoStack.push(ta.value);
     const v = redoStack.pop();
-    ta.value = v; lastSnapshot = v; writeNativeCSS(v); refreshCount();
+    ta.value = v; lastSnapshot = v; writeNativeCSS(v); syncHighlight(); refreshCount();
   });
   resetBtn.addEventListener('click', () => {
     undoStack.push(ta.value); redoStack.length = 0;
     ta.value = openBackup; lastSnapshot = openBackup; writeNativeCSS(openBackup);
-    refreshCount(); showToast('已恢复到打开编辑器时');
+    syncHighlight(); refreshCount(); showToast('已恢复到打开编辑器时');
   });
 
   // #6 显式保存：立即写回 #customCSS（本已自动保存，但给用户可确认的手段）
@@ -505,6 +509,7 @@ async function renderEditor() {
     const line = before.split('\n').length - 1;
     const lh = parseFloat(getComputedStyle(ta).lineHeight) || 18;
     ta.scrollTop = Math.max(0, line * lh - ta.clientHeight / 2);
+    if (hlPre) { hlPre.scrollTop = ta.scrollTop; hlPre.scrollLeft = ta.scrollLeft; }
     countEl.textContent = `${activeIdx + 1}/${matchStarts.length}`;
   };
   // 打字：只更新计数，不跳转（避免抢光标）
@@ -516,13 +521,56 @@ async function renderEditor() {
   prevBtn.addEventListener('click', () => goto(-1));
 
   refreshCount();
+  syncHighlight();  // 初次渲染高亮
+
+  // 点选后定位：在 #customCSS 全文里找该元素相关那段。
+  // 用选择器的"最后一段"当搜索词（如 #chat .mes_text → .mes_text），命中率高于整串。
+  if (locateSelector) {
+    const needle = locateSelectorNeedle(locateSelector);
+    const at = needle ? ta.value.indexOf(needle) : -1;
+    if (at !== -1) {
+      searchBox.value = needle;
+      refreshCount();
+      goto(1);
+      showLocateHint(`已在你的自定义CSS里定位到 ${needle}，可直接改。`, false);
+    } else {
+      // 搜不到：只提示，绝不往 #customCSS 写任何骨架（见记忆 never-auto-write-user-css）
+      showLocateHint(`没在你的自定义CSS里找到 ${needle || '这个元素'} 相关的规则——说明还没给它写过样式。你可以自己在末尾新写一条，或点下面「生成提问问 AI」让 AI 从零帮你写。`, true);
+    }
+  }
 }
 
-/* ============ 区域（层级链，直接显示区域名，不要"选大选小") ============ */
+// 从精确选择器取一个适合搜索的片段：优先自身 id/class 的最后一段
+function locateSelectorNeedle(selector) {
+  if (!selector) return '';
+  const last = selector.trim().split(/\s+/).pop() || selector;
+  // 去掉 :nth-of-type(...) 这类，留纯 #id / .class / tag
+  return last.replace(/:nth-of-type\(\d+\)/g, '');
+}
+
+// 编辑器顶部的定位提示条（found=false 时是"没找到"的橙色提示）
+function showLocateHint(text, notFound) {
+  const step = panelEl.querySelector('.cssw-step-editor');
+  if (!step) return;
+  let hint = step.querySelector('.cssw-editor-tip');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.className = 'cssw-editor-tip';
+    step.insertBefore(hint, step.firstChild);
+  }
+  hint.textContent = text;
+  hint.classList.toggle('cssw-editor-tip-warn', !!notFound);
+}
+
+/* ============ 区域：区域名 + 精确选择器(可复制) + 现状 + 层级链 + 诉求输入 ============ */
 function renderArea() {
   const el = containerChain[chainIndex] || currentTarget;
   const info = identify(el);
   const step = panelEl.querySelector('.cssw-step-area');
+
+  // 现状 + 选择器（供展示 + 生成提问复用）
+  try { lastAnalysis = analyze(el); } catch (_) { lastAnalysis = { computed: {}, pseudo: [] }; }
+  lastSelector = buildUniqueSelector(el);
 
   let chainHtml = '';
   if (containerChain.length > 1) {
@@ -536,30 +584,57 @@ function renderArea() {
   }
 
   const noteHtml = info.note ? `<div class="cssw-area-note">${escapeHtml(info.note)}</div>` : '';
+  const selHtml = lastSelector
+    ? `<div class="cssw-sel-row"><code class="cssw-sel-code">${escapeHtml(lastSelector)}</code><button type="button" class="cssw-sel-copy" title="复制选择器">📋</button></div>`
+    : '';
+  // 现状摘要（最多列几条常用的，避免太长）
+  const comp = lastAnalysis && lastAnalysis.computed ? lastAnalysis.computed : {};
+  const compKeys = Object.keys(comp).slice(0, 6);
+  const compHtml = compKeys.length
+    ? `<div class="cssw-now"><div class="cssw-now-title">它现在的样子：</div>${compKeys.map((k) => `<div class="cssw-now-item"><span>${escapeHtml(k)}</span><span>${escapeHtml(comp[k])}</span></div>`).join('')}</div>`
+    : '';
+
   step.innerHTML = `
     <div class="cssw-card cssw-area-card">
       <div class="cssw-area-label">正在改</div>
       <div class="cssw-area-name">${escapeHtml(info.name)}</div>
       ${noteHtml}
+      ${selHtml}
       ${chainHtml}
+    </div>
+    ${compHtml}
+    <div class="cssw-card">
+      <label class="cssw-q" for="cssw-usertext">你想把它改成什么样？（一句话，可留空）</label>
+      <textarea id="cssw-usertext" class="cssw-usertext" rows="2" placeholder="例如：字大一点、背景透明些、加个圆角">${escapeHtml(userText)}</textarea>
     </div>
   `;
   step.hidden = false;
 
-  // 持续高亮当前选中的元素（不只是点选瞬间），让用户始终看清在改哪
+  // 持续高亮当前选中的元素
   showPersistentHighlight(el);
 
-  // 面包屑重建后横向滚动条会归零 → 把选中项拉回可视区（#1：点最右层不再跳回第一层）
+  // 面包屑重建后横向滚动条归零 → 选中项拉回可视区
   const activeCrumb = step.querySelector('.cssw-crumb.active');
   if (activeCrumb && activeCrumb.scrollIntoView) {
     try { activeCrumb.scrollIntoView({ inline: 'nearest', block: 'nearest' }); } catch (_) {}
+  }
+
+  const selCopy = step.querySelector('.cssw-sel-copy');
+  if (selCopy) selCopy.addEventListener('click', () => copyText(lastSelector, selCopy));
+
+  const ut = step.querySelector('.cssw-usertext');
+  if (ut) {
+    ut.addEventListener('input', () => { userText = ut.value; });
+    ut.addEventListener('mousedown', (e) => e.stopPropagation());
+    ut.addEventListener('pointerdown', (e) => e.stopPropagation());
   }
 
   step.querySelectorAll('.cssw-crumb').forEach((btn) => {
     btn.addEventListener('click', () => {
       chainIndex = parseInt(btn.getAttribute('data-idx'), 10) || 0;
       renderArea();
-      renderWhat();
+      // 切层后重新定位编辑器
+      if (editorOpen) openEditorAndLocate();
     });
   });
 }
@@ -595,178 +670,27 @@ function hidePersistentHighlight() {
   if (persistHlEl) persistHlEl.style.display = 'none';
 }
 
-/* ============ 改什么（部位卡片，手风琴：选中即就地展开"怎么改"） ============ */
-function renderWhat() {
-  const step = panelEl.querySelector('.cssw-step-what');
-  // 每个部位：卡片 +（若选中）紧跟其后的"怎么改"面板，面板在网格里横跨整行，
-  // 视觉上从属该卡、就地展开——选完立刻看到下一步，不用往下滚找。
-  const parts = WHAT_OPTIONS.map((o) => {
-    const selected = !!intents[o.key];
-    const on = selected ? ' active' : '';
-    const note = o.note ? `<span class="cssw-part-note">${escapeHtml(o.note)}</span>` : '';
-    const caret = `<span class="cssw-part-caret">${selected ? '▲' : '▼'}</span>`;
-    const card = `<button type="button" class="cssw-part-card${on}" data-key="${o.key}" data-label="${escapeHtml(o.label)}">`
-      + `<span class="cssw-part-name">${escapeHtml(o.label)}</span>${caret}${note}</button>`;
-    const panel = selected ? `<div class="cssw-how-panel" data-for="${o.key}"></div>` : '';
-    return card + panel;
-  }).join('');
-  step.innerHTML = `
-    <div class="cssw-card">
-      <div class="cssw-q">想改这里的哪个部位？（可多选，点开看怎么改）</div>
-      <div class="cssw-parts">${parts}</div>
-    </div>
-  `;
-  step.hidden = false;
-
-  step.querySelectorAll('.cssw-part-card').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const key = btn.getAttribute('data-key');
-      const label = btn.getAttribute('data-label');
-      if (intents[key]) { delete intents[key]; } else { intents[key] = { whatLabel: label, howKey: null, howLabel: null }; }
-      renderWhat();
-    });
-  });
-
-  step.querySelectorAll('.cssw-how-panel').forEach((panel) => {
-    renderHowPanel(panel, panel.getAttribute('data-for'));
-  });
-  updateFooter();
-}
-
-// 渲染单个部位的"怎么改"面板（手风琴展开体）：小 chip 单选；选"自己描述"给输入框。
-function renderHowPanel(container, key) {
-  const it = intents[key];
-  if (!it) { container.innerHTML = ''; return; }
-  const opts = getHowOptions(key);
-  const chips = opts.map((o) => {
-    const on = it.howKey === o.key ? ' active' : '';
-    return `<button type="button" class="cssw-chip cssw-how-chip${on}" data-key="${o.key}" data-label="${escapeHtml(o.label)}">${escapeHtml(o.label)}</button>`;
-  }).join('');
-  const customBox = it.howKey === 'custom'
-    ? `<input type="text" class="cssw-how-custom" placeholder="用一句话说你想怎么改" value="${escapeHtml(it.customText || '')}" />`
-    : '';
-  container.innerHTML = `<div class="cssw-how-title">「${escapeHtml(it.whatLabel)}」想怎么改？</div>`
-    + `<div class="cssw-chips cssw-chips-sm">${chips}</div>${customBox}`;
-
-  container.querySelectorAll('.cssw-how-chip').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      it.howKey = btn.getAttribute('data-key');
-      it.howLabel = btn.getAttribute('data-label');
-      renderHowPanel(container, key);
-      // 选了"自己描述"→ 自动聚焦输入框
-      if (it.howKey === 'custom') {
-        const inp = container.querySelector('.cssw-how-custom');
-        if (inp) inp.focus();
-      }
-    });
-  });
-
-  const inp = container.querySelector('.cssw-how-custom');
-  if (inp) {
-    inp.addEventListener('input', () => {
-      it.customText = inp.value;
-      it.howLabel = inp.value.trim() || '自己描述';
-    });
-    inp.addEventListener('mousedown', (e) => e.stopPropagation());
-  }
-}
-
-/* ============ 购物车（多区域） ============ */
-
-// 把当前选中元素 + 已选诉求打包成一个 cart item（含即时分析）
-function snapshotCurrent() {
-  const el = containerChain[chainIndex] || currentTarget;
-  if (!el) return null;
-  const info = identify(el);
-  const whatKeys = Object.keys(intents);
-  if (!whatKeys.length) return null;
-  let analysis;
-  try { analysis = analyze(el, whatKeys.length === 1 ? whatKeys[0] : whatKeys); }
-  catch (e) { analysis = { relevantRules: [], pseudo: [], variables: [], computed: {}, authoredHere: false, partialUnreadable: true }; }
-  return {
-    areaName: info.name,
-    areaAiName: info.aiName || info.name,  // 给 AI 用的精确名（顶栏项为英文功能名），无则同 areaName
-    intents: whatKeys.map((k) => ({ whatKey: k, whatLabel: intents[k].whatLabel, howKey: intents[k].howKey, howLabel: intents[k].howLabel || '（你决定合适的）' })),
-    analysis,
-    locator: buildLocator(el, info.standardSelector),
-  };
-}
-
-function addCurrentToCart() {
-  const item = snapshotCurrent();
-  if (!item) { showToast('先选"改什么"再加入清单'); return; }
-  cart.push(item);
-  updateCartBadge();
-  showToast(`已加入清单（共 ${cart.length} 处）。可继续点 🎯 选下一处`);
-  // 重置当前诉求，回到"待点选"空状态 → 收起底部操作条
-  intents = {};
-  hideStep('.cssw-step-area');
-  hideStep('.cssw-step-what');
-  hideFooter();
-  const empty = panelEl.querySelector('.cssw-empty');
-  if (empty) { empty.hidden = false; empty.textContent = `清单里有 ${cart.length} 处。点 🎯 继续选，或点 🧺 查看/生成。`; }
-}
-
-function updateCartBadge() {
-  const badge = panelEl && panelEl.querySelector('.cssw-cart-badge');
-  if (!badge) return;
-  badge.textContent = cart.length;
-  badge.hidden = cart.length === 0;
-}
-
-function toggleCart() {
-  const step = panelEl.querySelector('.cssw-step-cart');
-  if (!step.hidden) {
-    // 关闭购物车：若还停在"选部位"步骤，恢复底部操作条
-    step.hidden = true; step.innerHTML = '';
-    const whatStep = panelEl.querySelector('.cssw-step-what');
-    if (whatStep && !whatStep.hidden) showFooter();
-    return;
-  }
-  // 打开购物车：收起底部操作条，用购物车自己的生成按钮（避免两个生成按钮打架）
-  hideFooter();
-  renderCart();
-}
-
-function renderCart() {
-  const step = panelEl.querySelector('.cssw-step-cart');
-  if (!cart.length) {
-    step.innerHTML = `<div class="cssw-q">修改清单</div><div class="cssw-cart-empty">清单是空的。选好一处后点"加入清单"。</div>`;
-    step.hidden = false;
-    return;
-  }
-  const items = cart.map((it, i) => {
-    const desc = it.intents.map((x) => `${x.whatLabel}→${x.howLabel}`).join('、');
-    return `<div class="cssw-cart-item"><span class="cssw-cart-item-text"><b>${escapeHtml(it.areaName)}</b>：${escapeHtml(desc)}</span><button type="button" class="cssw-cart-del" data-i="${i}" title="删除">✕</button></div>`;
-  }).join('');
-  step.innerHTML = `
-    <div class="cssw-q">修改清单（${cart.length} 处）</div>
-    <div class="cssw-cart-list">${items}</div>
-    <button type="button" class="cssw-cart-gen">生成提问（${cart.length} 处一起）</button>
-  `;
-  step.hidden = false;
-  step.querySelectorAll('.cssw-cart-del').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      cart.splice(parseInt(btn.getAttribute('data-i'), 10), 1);
-      updateCartBadge();
-      renderCart();
-    });
-  });
-  step.querySelector('.cssw-cart-gen').addEventListener('click', () => {
-    const text = buildMultiPrompt(cart);
-    renderResult(text);
-  });
-}
-
 /* ============ 生成结果 ============ */
 function onGenerate() {
-  // 把当前正在编辑的区域（若有诉求）也算进去，和清单一起生成
-  const items = cart.slice();
-  const current = snapshotCurrent();
-  if (current) items.push(current);
-  if (!items.length) { showToast('先选"改什么"'); return; }
-  const text = items.length === 1 ? buildPrompt(items[0]) : buildMultiPrompt(items);
+  const el = containerChain[chainIndex] || currentTarget;
+  if (!el) { showToast('先点 🎯 选一个要改的地方'); return; }
+  const info = identify(el);
+  if (!lastAnalysis) { try { lastAnalysis = analyze(el); } catch (_) { lastAnalysis = { computed: {}, pseudo: [] }; } }
+  if (!lastSelector) lastSelector = buildUniqueSelector(el);
+  const text = buildPrompt({
+    areaName: info.name,
+    areaAiName: info.aiName || info.name,
+    selector: lastSelector,
+    computed: lastAnalysis.computed,
+    pseudo: lastAnalysis.pseudo,
+    userText,
+    customCss: safeReadNativeCSS(),
+  });
   renderResult(text);
+}
+
+function safeReadNativeCSS() {
+  try { return readNativeCSS() || ''; } catch (_) { return ''; }
 }
 
 function renderResult(text) {
@@ -785,36 +709,26 @@ function renderResult(text) {
   step.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-// #7：生成后一键清空所有选择和清单，从头改别处，不用逐个删旧诉求
+// #7：生成后一键清空，从头改别处
 function restartAll() {
-  intents = {};
-  extraText = '';
-  cart = [];
-  updateCartBadge();
+  userText = '';
+  lastAnalysis = null;
+  lastSelector = '';
+  currentTarget = null;
+  containerChain = [];
+  chainIndex = 0;
   hideStep('.cssw-step-area');
-  hideStep('.cssw-step-what');
+  hideStep('.cssw-step-editor');
   hideStep('.cssw-step-result');
-  hideStep('.cssw-step-cart');
+  editorOpen = false;
   hideFooter();
   hidePersistentHighlight();
   const empty = panelEl.querySelector('.cssw-empty');
   if (empty) { empty.hidden = false; empty.textContent = '已清空。点顶部 🎯 重新选择要改的地方。'; }
-  showToast('已清空所有选择，可以重新开始');
+  showToast('已清空，可以重新开始');
 }
 
 /* ============ 工具 ============ */
-function buildLocator(el, standardSelector) {
-  const classes = [];
-  try { el.classList.forEach((c) => { if (!c.startsWith('cssw-')) classes.push(c); }); } catch (_) {}
-  return {
-    tag: el.tagName ? el.tagName.toLowerCase() : '',
-    id: el.id || '',
-    classes: classes.slice(0, 6),
-    standardSelector: standardSelector || '',
-    uniqueSelector: buildUniqueSelector(el),  // 尽量唯一的路径，让 AI 只改这一个
-  };
-}
-
 /**
  * 生成"尽量唯一"的选择器：优先自身 id；否则向上找带 id 的祖先做锚点 + 后代路径。
  * 目的：避免 AI 拿 .drawer-icon 这类通用类，一改改一整批。

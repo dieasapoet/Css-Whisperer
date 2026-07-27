@@ -226,22 +226,6 @@
   font-family: inherit;
   cursor: pointer;
 }
-.cssw-cart-badge {
-  position: absolute;
-  top: -2px;
-  right: -2px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--tt-accent);
-  color: #fff;
-  border-radius: 8px;
-  font-size: 10px;
-  font-weight: 700;
-}
 .cssw-empty {
   padding: 16px 4px;
   font-size: 13px;
@@ -392,44 +376,160 @@
 }
 
 /* 编辑区 textarea（镜像 #customCSS；搜索用原生 setSelectionRange 选中，不叠层→不抖） */
-.cssw-editor-host { margin-bottom: 6px; }
-.cssw-editor-textarea {
-  display: block;
-  width: 100%;
+/* 编辑区：透明 textarea 叠在 hljs 高亮层之上（共用完全相同的字体度量以逐像素对齐） */
+.cssw-editor-host {
+  position: relative;
+  margin-bottom: 6px;
   height: 260px;
-  padding: 10px;
+  resize: vertical;
+  overflow: hidden;
   border: 1px solid var(--tt-border);
   border-radius: var(--tt-radius-card);
   background: var(--tt-input-bg);
-  color: var(--tt-text);
+}
+/* 共用度量：高亮层和 textarea 必须完全一致，否则字符错位 */
+.cssw-editor-highlight,
+.cssw-editor-textarea {
+  margin: 0;
+  padding: 10px;
+  border: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
   font-size: 12.5px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   line-height: 1.5;
-  box-sizing: border-box;
-  resize: vertical;
-  white-space: pre-wrap;      /* 到宽度自动换行，不需左右滑动看内容 */
+  white-space: pre-wrap;
   word-break: break-word;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow-wrap: anywhere;
+  tab-size: 2;
 }
+/* 底层高亮（只读展示，不接收事件） */
+.cssw-editor-highlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  overflow: auto;
+  pointer-events: none;
+  background: transparent;
+  color: var(--tt-text);
+  z-index: 1;
+}
+.cssw-editor-highlight code {
+  font: inherit;
+  white-space: inherit;
+  word-break: inherit;
+  background: transparent;
+  padding: 0;
+}
+/* 上层可编辑 textarea：有高亮时文字透明只留光标；无 hljs 时（无 has-hl 类）文字正常显示 */
+.cssw-editor-textarea {
+  position: relative;
+  display: block;
+  z-index: 2;
+  background: transparent;
+  color: var(--tt-text);
+  caret-color: var(--tt-accent);
+  resize: none;
+  overflow: auto;
+}
+.cssw-editor-has-hl .cssw-editor-textarea {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+.cssw-editor-textarea::selection { background: rgba(217, 119, 87, 0.3); }
 .cssw-editor-loading { font-size: 12px; color: var(--tt-text-tertiary); padding: 4px 2px; }
 
-/* 自己描述输入框 */
-.cssw-how-custom {
+/* hljs 高亮配色（跟随皮肤，覆盖 hljs 默认主题的背景，只取前景色） */
+.cssw-editor-highlight .hljs-attribute,
+.cssw-editor-highlight .hljs-selector-tag,
+.cssw-editor-highlight .hljs-selector-class,
+.cssw-editor-highlight .hljs-selector-id,
+.cssw-editor-highlight .hljs-selector-pseudo { color: var(--tt-accent); }
+.cssw-editor-highlight .hljs-number,
+.cssw-editor-highlight .hljs-string,
+.cssw-editor-highlight .hljs-built_in { color: #4a8; }
+.cssw-editor-highlight .hljs-comment { color: var(--tt-text-tertiary); font-style: italic; }
+.cssw-editor-highlight .hljs-meta,
+.cssw-editor-highlight .hljs-keyword { color: #a67; }
+
+/* 定位提示条"没找到"警告态 */
+.cssw-editor-tip-warn {
+  border-color: var(--tt-accent);
+  background: rgba(217, 119, 87, 0.08);
+  color: var(--tt-text-secondary);
+}
+
+.cssw-editor-undo:disabled, .cssw-editor-redo:disabled { opacity: 0.4; cursor: not-allowed; }
+.cssw-editor-reset { color: var(--tt-danger); border-color: var(--tt-danger); }
+
+/* 精确选择器展示行 + 复制 */
+.cssw-sel-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.cssw-sel-code {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  background: var(--tt-input-bg);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-btn);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  color: var(--tt-accent);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.cssw-sel-copy {
+  flex: 0 0 auto;
+  width: 30px; height: 30px;
+  background: transparent;
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-btn);
+  cursor: pointer;
+  font-size: 13px;
+}
+.cssw-sel-copy:hover { background: rgba(128,128,128,0.12); }
+.cssw-sel-copy.cssw-copied { background: var(--tt-accent); border-color: var(--tt-accent); }
+
+/* 现状摘要 */
+.cssw-now {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: var(--tt-card-bg);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-card);
+}
+.cssw-now-title { font-size: 12px; color: var(--tt-text-secondary); margin-bottom: 4px; }
+.cssw-now-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--tt-text);
+  padding: 1px 0;
+}
+.cssw-now-item span:first-child { color: var(--tt-text-tertiary); flex: 0 0 auto; }
+.cssw-now-item span:last-child { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 诉求自由输入框 */
+.cssw-usertext {
   width: 100%;
-  height: 32px;
-  margin-top: 6px;
-  padding: 0 10px;
+  box-sizing: border-box;
+  padding: 8px 10px;
   border: 1px solid var(--tt-border);
   border-radius: var(--tt-radius-btn);
   background: var(--tt-input-bg);
   color: var(--tt-text);
   font-size: 13px;
   font-family: inherit;
-  box-sizing: border-box;
+  line-height: 1.5;
+  resize: vertical;
 }
-.cssw-editor-undo:disabled, .cssw-editor-redo:disabled { opacity: 0.4; cursor: not-allowed; }
-.cssw-editor-reset { color: var(--tt-danger); border-color: var(--tt-danger); }
 
 .cssw-chain {
   display: flex;
@@ -496,112 +596,19 @@
 .cssw-repick:hover { background: rgba(128, 128, 128, 0.1); }
 
 /* ========================================
- * 问答（改什么 / 怎么改）
+ * 问句/标签
  * ======================================== */
 .cssw-q {
+  display: block;
   font-size: var(--tt-fs-body);
   font-weight: 600;
   color: var(--tt-text);
   margin-bottom: 8px;
 }
 
-/* 部位选择卡片（背景/文字/边框/…）：两列网格，选中即在其下就地展开"怎么改" */
-.cssw-parts {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
-  align-items: start;
-}
-.cssw-part-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 8px 24px 8px 10px;  /* 右留位给展开箭头 */
-  text-align: left;
-  background: var(--tt-input-bg);
-  border: 1px solid var(--tt-border);
-  border-radius: var(--tt-radius-btn);
-  color: var(--tt-text);
-  cursor: pointer;
-  font-family: inherit;
-  transition: background 0.15s, border-color 0.15s, transform 0.1s;
-}
-.cssw-part-card:hover { border-color: var(--tt-accent); }
-.cssw-part-card:active { transform: scale(0.98); }
-.cssw-part-name { font-size: var(--tt-fs-body); font-weight: 600; }
-.cssw-part-note { font-size: 11px; color: var(--tt-text-tertiary); line-height: 1.35; }
-.cssw-part-caret {
-  position: absolute;
-  top: 8px; right: 8px;
-  font-size: 9px;
-  color: var(--tt-text-tertiary);
-  line-height: 1;
-}
-.cssw-part-card.active {
-  background: var(--tt-accent);
-  border-color: var(--tt-accent);
-  color: #fff;
-  /* 选中且展开时，底边贴合下方面板（去掉圆角+去掉底边视觉断层） */
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-/* 选中态：解释文字/箭头也转白色系（修 #5：Claude 皮肤橙底灰字看不清） */
-.cssw-part-card.active .cssw-part-note { color: rgba(255, 255, 255, 0.85); }
-.cssw-part-card.active .cssw-part-caret { color: rgba(255, 255, 255, 0.9); }
-
-/* 手风琴展开体：横跨整行，紧贴其部位卡下方，视觉上从属该卡 */
-.cssw-how-panel {
-  grid-column: 1 / -1;
-  margin-top: -6px;   /* 抵消 grid gap，与上方选中卡片贴合 */
-  margin-bottom: 4px;
-  padding: 10px;
-  background: var(--tt-card-bg);
-  border: 1px solid var(--tt-accent);
-  border-top: none;
-  border-radius: 0 0 var(--tt-radius-card) var(--tt-radius-card);
-}
-.cssw-how-title {
-  font-size: var(--tt-fs-note);
-  font-weight: 600;
-  color: var(--tt-text);
-  margin-bottom: 8px;
-}
-
-/* 紧凑标签 chip（"怎么改"小选项） */
-.cssw-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-.cssw-chips-sm { margin-bottom: 0; }
-.cssw-chip {
-  padding: 6px 12px;
-  min-height: 32px;
-  background: var(--tt-input-bg);
-  border: 1px solid var(--tt-border);
-  border-radius: 16px;
-  color: var(--tt-text);
-  cursor: pointer;
-  font-size: 13px;
-  font-family: inherit;
-  transition: background 0.15s, border-color 0.15s, transform 0.1s;
-}
-.cssw-chip:hover { background: rgba(128, 128, 128, 0.1); }
-.cssw-chip:active { transform: scale(0.96); }
-.cssw-chip.active {
-  background: var(--tt-accent);
-  border-color: var(--tt-accent);
-  color: #fff;
-  font-weight: 600;
-}
-.cssw-how-chip { font-size: 12px; padding: 5px 10px; min-height: 28px; }
-
 /* ========================================
- * 固定底部操作条（sticky footer，修 #3：缩小面板也不被遮挡）
- * 面板结构 = 工具栏(顶,常驻) + body(中,滚动) + footer(底,常驻)
+ * 固定底部操作条（sticky footer）
+ * 面板结构 = 工具栏(顶) + body(中,滚动) + footer(底,常驻)
  * ======================================== */
 .cssw-footer {
   flex-shrink: 0;
@@ -612,29 +619,14 @@
   background: var(--tt-bg-solid);
 }
 .cssw-footer[hidden] { display: none; }
-.cssw-add-btn {
-  flex: 1;
-  min-height: 42px;
-  background: transparent;
-  color: var(--tt-accent);
-  border: 1px solid var(--tt-accent);
-  border-radius: var(--tt-radius-btn);
-  font-size: 13px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.cssw-add-btn:hover:not(:disabled) { background: rgba(217, 119, 87, 0.08); }
-.cssw-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
 .cssw-gen-btn {
-  flex: 1.4;
-  min-height: 42px;
+  flex: 1;
+  min-height: 44px;
   background: var(--tt-accent);
   color: #fff;
   border: 1px solid var(--tt-accent);
   border-radius: var(--tt-radius-btn);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
@@ -642,46 +634,6 @@
 }
 .cssw-gen-btn:hover:not(:disabled) { background: var(--tt-accent-hover); }
 .cssw-gen-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-/* ========================================
- * 购物车（修改清单）
- * ======================================== */
-.cssw-cart-empty { font-size: 13px; color: var(--tt-text-tertiary); padding: 8px 2px; }
-.cssw-cart-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
-.cssw-cart-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  background: var(--tt-card-bg);
-  border: 1px solid var(--tt-border);
-  border-radius: var(--tt-radius-btn);
-}
-.cssw-cart-item-text { flex: 1; min-width: 0; font-size: 12.5px; color: var(--tt-text); line-height: 1.4; }
-.cssw-cart-del {
-  flex: 0 0 auto;
-  width: 24px; height: 24px;
-  background: transparent;
-  border: none;
-  color: var(--tt-text-tertiary);
-  cursor: pointer;
-  font-size: 13px;
-  border-radius: 6px;
-}
-.cssw-cart-del:hover { background: rgba(193, 95, 60, 0.12); color: var(--tt-danger); }
-.cssw-cart-gen {
-  width: 100%;
-  min-height: 44px;
-  background: var(--tt-accent);
-  color: #fff;
-  border: 1px solid var(--tt-accent);
-  border-radius: var(--tt-radius-btn);
-  font-size: 14px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-}
-.cssw-cart-gen:hover { background: var(--tt-accent-hover); }
 
 /* ========================================
  * 结果区
