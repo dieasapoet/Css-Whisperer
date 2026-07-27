@@ -365,18 +365,23 @@ function renderArea() {
     ? `<div class="cssw-sel-row"><code class="cssw-sel-code">${escapeHtml(lastSelector)}</code><button type="button" class="cssw-sel-copy" title="复制选择器">📋</button></div>`
     : '';
 
-  // 从 customCSS 全文里挖出"含这个元素(及父级)"的相关规则原文，直接显示 + 给搜索词
+  // 从 customCSS 全文里挖出"含这个元素"的相关规则原文，直接显示 + 给搜索词。
+  // 默认只显前 2 段，其余折叠进 <details>，整区限高滚动，绝不挤走底部按钮。
   const rules = findRelatedRules(el);
   let codeHtml;
   if (rules.length) {
-    codeHtml = `<div class="cssw-rules"><div class="cssw-rules-title">📄 你的自定义CSS里，和这里相关的代码（${rules.length} 段）：</div>`
-      + rules.map((r) => `<div class="cssw-rule">`
-        + `<pre class="cssw-rule-code">${escapeHtml(r.text)}</pre>`
-        + `<div class="cssw-rule-find"><span>去编辑器里搜这段定位：</span><code>${escapeHtml(r.needle)}</code><button type="button" class="cssw-rule-copy" data-needle="${escapeHtml(r.needle)}" title="复制搜索词">📋</button></div>`
-        + `</div>`).join('')
+    const renderRule = (r) => `<div class="cssw-rule">`
+      + `<pre class="cssw-rule-code">${escapeHtml(r.text)}</pre>`
+      + `<div class="cssw-rule-find"><span>搜这段定位：</span><code>${escapeHtml(r.needle)}</code><button type="button" class="cssw-rule-copy" data-needle="${escapeHtml(r.needle)}" title="复制搜索词">📋</button></div>`
       + `</div>`;
+    const head = rules.slice(0, 2).map(renderRule).join('');
+    const rest = rules.slice(2);
+    const restHtml = rest.length
+      ? `<details class="cssw-rules-more"><summary>还有 ${rest.length} 段，展开看</summary>${rest.map(renderRule).join('')}</details>`
+      : '';
+    codeHtml = `<div class="cssw-rules"><div class="cssw-rules-title">📄 自定义CSS里和这里相关的代码（${rules.length} 段）：</div>${head}${restHtml}</div>`;
   } else {
-    codeHtml = `<div class="cssw-has cssw-has-no">⚠️ 你的自定义CSS里还没写这里的样式，需要新加一条（点下面生成提问让 AI 帮你写）</div>`;
+    codeHtml = `<div class="cssw-has cssw-has-no">⚠️ 自定义CSS里还没写这里，需新加一条（点下面生成提问让 AI 帮你写）</div>`;
   }
 
   // 现状摘要（最多列几条常用的，避免太长）
@@ -498,33 +503,50 @@ function safeReadNativeCSS() {
   try { return readNativeCSS() || ''; } catch (_) { return ''; }
 }
 
-// 从 #customCSS 全文里挖出"选择器含这个元素(或父级1-2层)id/class"的规则段，整段返回。
-// 搜锚点(class/id)而非 computed 值——伪元素文案/类选择器/var() 写的规则，computed 对不上，
-// 但源码选择器里必然含它的 class/id。父级也搜：伪元素假文字常写在父容器选择器上。
+// 从 #customCSS 全文里挖出"选择器含这个元素 id/class"的规则段，整段返回。
+// 精准策略：优先只用【元素自身】的锚点找；自身一段都没有时，才回退到父级
+// （伪元素假文字常写在父容器上），且父级排除 .mes 这类大众容器类，避免命中一大堆。
 function findRelatedRules(el) {
   const css = safeReadNativeCSS();
   if (!css) return [];
 
-  // 收集锚点：元素自身 + 父级 1-2 层 的 id / 有意义 class
-  const anchors = [];
-  let node = el;
-  for (let d = 0; d <= 2 && node && node !== document.body; d++) {
-    if (node.id) anchors.push('#' + node.id);
-    try { node.classList.forEach((c) => { if (!c.startsWith('cssw-') && c.length > 1) anchors.push('.' + c); }); } catch (_) {}
+  // 自身锚点
+  const selfAnchors = [];
+  if (el.id) selfAnchors.push('#' + el.id);
+  try { el.classList.forEach((c) => { if (!c.startsWith('cssw-') && c.length > 1) selfAnchors.push('.' + c); }); } catch (_) {}
+
+  // 父级锚点（1-2 层，排除大众容器类，只留 id 和较独特的 class）
+  const parentAnchors = [];
+  let node = el.parentElement;
+  for (let d = 1; d <= 2 && node && node !== document.body; d++) {
+    if (node.id) parentAnchors.push('#' + node.id);
+    try { node.classList.forEach((c) => { if (!c.startsWith('cssw-') && c.length > 1 && !COMMON_CONTAINER_CLASSES.has(c)) parentAnchors.push('.' + c); }); } catch (_) {}
     node = node.parentElement;
   }
-  if (!anchors.length) return [];
 
-  // 把 customCSS 切成一条条规则块（selector { ... }），只保留选择器命中锚点的
+  // 先用自身；命中为空再用父级
+  let rules = extractRules(css, selfAnchors);
+  if (!rules.length) rules = extractRules(css, parentAnchors);
+  return rules;
+}
+
+// 太大众的容器类，出现在父级时不拿来匹配（否则命中一大堆无关规则）
+const COMMON_CONTAINER_CLASSES = new Set([
+  'mes', 'mes_block', 'mes_text', 'name_text', 'flex-container', 'last_mes',
+  'mesAvatarWrapper', 'mes_buttons', 'swipe_left', 'swipe_right', 'drawer',
+  'drawer-content', 'wide100p', 'alignItemsCenter', 'justifySpaceBetween',
+]);
+
+function extractRules(css, anchors) {
+  if (!anchors || !anchors.length) return [];
   const out = [];
   const seen = new Set();
   const re = /([^{}]+)\{([^{}]*)\}/g;
   let m;
-  while ((m = re.exec(css)) !== null && out.length < 8) {
-    const selector = m[1].trim().replace(/^[\s\S]*?\*\//, '').trim(); // 去掉规则前残留的注释尾
+  while ((m = re.exec(css)) !== null && out.length < 12) {
+    const selector = m[1].trim().replace(/^[\s\S]*?\*\//, '').trim();
     const body = m[2].trim();
     if (!selector || selector.startsWith('@')) continue;
-    // 选择器里是否含任一锚点（作为完整 token，避免 .mes 命中 .message）
     const hit = anchors.find((a) => selectorHasAnchor(selector, a));
     if (!hit) continue;
     const full = `${selector} { ${body} }`;
