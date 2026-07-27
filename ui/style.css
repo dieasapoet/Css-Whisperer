@@ -115,8 +115,6 @@
     width: 92vw;
     max-height: 80vh;   /* 不占满全屏，露出底部让用户知道下面还有页面(#6) */
   }
-  /* 手机上编辑器矮一点，别一开就吃掉半屏 */
-  .cssw-editor-host { height: 240px; }
 }
 
 /* ========================================
@@ -275,164 +273,11 @@
 }
 
 /* ========================================
- * CSS 编辑框（搜索 / 粘贴 / 保存）
+ * 有没有对应代码 一行提示
  * ======================================== */
-.cssw-editor-btn {
-  width: 100%;
-  min-height: 40px;
-  margin-top: 10px;
-  background: transparent;
-  color: var(--tt-text);
-  border: 1px solid var(--tt-border);
-  border-radius: var(--tt-radius-btn);
-  font-size: 13px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.cssw-editor-btn:hover { background: rgba(128, 128, 128, 0.1); }
-
-.cssw-editor-searchrow {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-.cssw-editor-search {
-  flex: 1;
-  min-width: 0;
-  height: 38px;
-  padding: 0 10px;
-  border: 1px solid var(--tt-border);
-  border-radius: var(--tt-radius-btn);
-  background: var(--tt-input-bg);
-  color: var(--tt-text);
-  font-size: 13px;
-  font-family: inherit;
-}
-.cssw-editor-prev, .cssw-editor-next, .cssw-editor-top, .cssw-editor-bottom {
-  flex: 0 0 auto;
-  width: 32px;
-  height: 38px;
-  background: var(--tt-card-bg);
-  color: var(--tt-text);
-  border: 1px solid var(--tt-border);
-  border-radius: var(--tt-radius-btn);
-  font-size: 13px;
-  font-family: inherit;
-  cursor: pointer;
-}
-.cssw-editor-prev:hover, .cssw-editor-next:hover,
-.cssw-editor-top:hover, .cssw-editor-bottom:hover { background: rgba(128, 128, 128, 0.12); }
-.cssw-editor-count {
-  flex: 0 0 auto;
-  min-width: 40px;
-  height: 38px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  color: var(--tt-text-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-/* 保存/撤回/重置/重做 */
-.cssw-editor-actions { display: flex; gap: 6px; margin-bottom: 8px; }
-.cssw-editor-save {
-  flex: 1.3;
-  height: 34px;
-  background: var(--tt-accent);
-  color: #fff;
-  border: 1px solid var(--tt-accent);
-  border-radius: var(--tt-radius-btn);
-  font-size: 12px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.cssw-editor-save:hover { background: var(--tt-accent-hover); }
-.cssw-editor-save.cssw-saved { background: var(--tt-success); border-color: var(--tt-success); }
-.cssw-editor-undo, .cssw-editor-reset, .cssw-editor-redo {
-  flex: 1;
-  height: 34px;
-  background: transparent;
-  color: var(--tt-text);
-  border: 1px solid var(--tt-border);
-  border-radius: var(--tt-radius-btn);
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.cssw-editor-undo:hover:not(:disabled), .cssw-editor-reset:hover, .cssw-editor-redo:hover:not(:disabled) { background: rgba(128, 128, 128, 0.12); }
-.cssw-editor-redo:disabled { opacity: 0.4; cursor: not-allowed; }
-
-/* 编辑器顶部提示（检测到柏宝箱时） */
-.cssw-editor-tip {
-  margin-bottom: 8px;
-  padding: 8px 10px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--tt-text-secondary);
-  background: var(--tt-card-bg);
-  border: 1px solid var(--tt-border);
-  border-radius: var(--tt-radius-btn);
-}
-
-/* 编辑区容器：CodeMirror 撑满；无 CM 时退化为纯 textarea */
-.cssw-editor-host {
-  position: relative;
-  margin-bottom: 6px;
-  height: 300px;
-  border: 1px solid var(--tt-border);
-  border-radius: var(--tt-radius-card);
-  overflow: hidden;
-  background: var(--tt-input-bg);
-}
-/* 纯 textarea 后备（CM 加载失败时） */
-.cssw-editor-textarea {
-  display: block;
-  width: 100%;
-  height: 100%;
-  padding: 10px;
-  margin: 0;
-  border: 0;
-  box-sizing: border-box;
-  background: var(--tt-input-bg);
-  color: var(--tt-text);
-  font-size: 12.5px;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  resize: none;
-}
-/* CodeMirror 实例填满容器 + 跟随皮肤配色 */
-.cssw-editor-host .CodeMirror {
-  height: 100%;
-  font-size: 12.5px;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  line-height: 1.5;
-  background: var(--tt-input-bg);
-  color: var(--tt-text);
-}
-.cssw-editor-host .CodeMirror-gutters {
-  background: var(--tt-card-bg);
-  border-right: 1px solid var(--tt-border);
-}
-.cssw-editor-host .CodeMirror-linenumber { color: var(--tt-text-tertiary); }
-.cssw-editor-host .CodeMirror-cursor { border-left-color: var(--tt-accent); }
-.cssw-editor-host .CodeMirror-selected { background: rgba(217, 119, 87, 0.25) !important; }
-.cssw-editor-loading { font-size: 12px; color: var(--tt-text-tertiary); padding: 4px 2px; }
-
-/* 定位提示条"没找到"警告态 */
-.cssw-editor-tip-warn {
-  border-color: var(--tt-accent);
-  background: rgba(217, 119, 87, 0.08);
-  color: var(--tt-text-secondary);
-}
-
-.cssw-editor-undo:disabled, .cssw-editor-redo:disabled { opacity: 0.4; cursor: not-allowed; }
-.cssw-editor-reset { color: var(--tt-danger); border-color: var(--tt-danger); }
+.cssw-has { margin-top: 8px; font-size: 12.5px; line-height: 1.4; }
+.cssw-has-yes { color: var(--tt-success); }
+.cssw-has-no { color: var(--tt-danger); }
 
 /* 精确选择器展示行 + 复制 */
 .cssw-sel-row {
@@ -590,20 +435,6 @@
   background: var(--tt-bg-solid);
 }
 .cssw-footer[hidden] { display: none; }
-.cssw-edit-btn {
-  flex: 1;
-  min-height: 44px;
-  background: transparent;
-  color: var(--tt-accent);
-  border: 1px solid var(--tt-accent);
-  border-radius: var(--tt-radius-btn);
-  font-size: 14px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.cssw-edit-btn:hover { background: rgba(217, 119, 87, 0.08); }
 .cssw-gen-btn {
   flex: 1;
   min-height: 44px;
@@ -611,7 +442,7 @@
   color: #fff;
   border: 1px solid var(--tt-accent);
   border-radius: var(--tt-radius-btn);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;

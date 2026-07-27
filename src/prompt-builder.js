@@ -48,8 +48,11 @@ function buildPrompt(p) {
     lines.push('```');
   }
   if (pseudo && pseudo.length) {
-    lines.push('它还用了伪元素画东西（有些"文字/图标"其实是伪元素 content 画的，要改得改 content）：');
-    pseudo.forEach((ps) => lines.push(`  ${ps.pseudo} content: ${ps.content}`));
+    lines.push('它（或它的父级容器）还用了伪元素画东西——界面上有些"文字/图标"其实是伪元素 content 画的，要改这种文字得改对应伪元素的 content，而不是页面里的普通文本：');
+    pseudo.forEach((ps) => {
+      const where = ps.selectorHint ? ` 选择器约为 ${ps.selectorHint}` : '';
+      lines.push(`  ${ps.pseudo}${where} 的 content: ${ps.content}`);
+    });
   }
   lines.push('');
 

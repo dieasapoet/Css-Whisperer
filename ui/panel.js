@@ -19,7 +19,7 @@ import { enterPickMode, exitPickMode, isPicking, getContainerChain, showToast } 
 import { identify } from '../src/semantic.js';
 import { analyze } from '../src/analyzer.js';
 import { buildPrompt } from '../src/prompt-builder.js';
-import { readNativeCSS, writeNativeCSS, nativeExists } from '../src/editor.js';
+import { readNativeCSS } from '../src/editor.js';
 
 const PANEL_ID = 'cssw-panel';
 const ORB_ID = 'cssw-orb';
@@ -35,7 +35,6 @@ let panelEl = null;
 let orbEl = null;
 let currentSkin = 'frosted';
 let orbGesture = null;
-let editorOpen = false;
 
 // 选择状态
 let containerChain = [];
@@ -142,7 +141,6 @@ function renderShell() {
   return `
     <div class="cssw-toolbar">
       <button type="button" class="cssw-tb cssw-tb-pick" title="点选界面上要改的地方">🎯</button>
-      <button type="button" class="cssw-tb cssw-tb-editor" title="打开自定义CSS编辑框（搜索/粘贴/保存）">✏️</button>
       <span class="cssw-tb-title">点问</span>
       <select class="cssw-skin-select cssw-tb-skin" title="面板皮肤">
         <option value="frosted">磨砂</option>
@@ -153,12 +151,10 @@ function renderShell() {
     </div>
     <div class="cssw-body">
       <div class="cssw-step cssw-step-area" hidden></div>
-      <div class="cssw-step cssw-step-editor" hidden></div>
       <div class="cssw-step cssw-step-result" hidden></div>
       <div class="cssw-empty">点顶部 🎯 开始：先点界面上想改的地方。</div>
     </div>
     <div class="cssw-footer" hidden>
-      <button type="button" class="cssw-edit-btn">✏️ 我自己改代码</button>
       <button type="button" class="cssw-gen-btn">💬 生成提问问 AI</button>
     </div>
   `;
@@ -168,9 +164,7 @@ function bindShellEvents() {
   panelEl.querySelector('.cssw-close').addEventListener('click', closePanel);
   panelEl.querySelector('.cssw-min').addEventListener('click', collapseToOrb);
   panelEl.querySelector('.cssw-tb-pick').addEventListener('click', onPickClick);
-  panelEl.querySelector('.cssw-tb-editor').addEventListener('click', () => toggleEditor());
-  // 固定底部操作条：改代码 / 生成提问
-  panelEl.querySelector('.cssw-footer .cssw-edit-btn').addEventListener('click', openEditorAndLocate);
+  // 固定底部操作条：生成提问
   panelEl.querySelector('.cssw-footer .cssw-gen-btn').addEventListener('click', onGenerate);
   const skinSel = panelEl.querySelector('.cssw-skin-select');
   skinSel.value = currentSkin;
@@ -337,263 +331,13 @@ function onElementPicked(el) {
   containerChain = getContainerChain(el);
   chainIndex = 0;
   userText = '';
-  editorOpen = false;
-  hideStep('.cssw-step-editor');
   hideStep('.cssw-step-result');
   const empty = panelEl.querySelector('.cssw-empty'); if (empty) empty.hidden = true;
   expandPanel();
-  renderArea();       // 极简一屏：区域名 + 精确选择器(可复制) + 现状 + 层级链 + 诉求输入框
-  showFooter();       // 底部两个出口：改代码 / 生成提问。编辑器不默认展开(#5#6：首屏轻)
+  renderArea();       // 极简一屏：区域名 + 选择器(可复制) + 有无对应代码 + 诉求框 + 层级链
+  showFooter();
 }
 
-/* ============ CSS 编辑框 ============ */
-function toggleEditor() {
-  const step = panelEl.querySelector('.cssw-step-editor');
-  if (editorOpen) { step.hidden = true; step.innerHTML = ''; editorOpen = false; return; }
-  if (!nativeExists()) { showToast('找不到 SillyTavern 的自定义CSS框，请先打开一次「用户设置」'); return; }
-  const empty = panelEl.querySelector('.cssw-empty'); if (empty) empty.hidden = true;
-  renderEditor();
-  editorOpen = true;
-}
-
-// 点选后默认调用：打开编辑器，并尝试定位到当前元素相关那段（搜到→跳转高亮；搜不到→面板提示，不写入）
-function openEditorAndLocate() {
-  if (!nativeExists()) return;  // 没有 #customCSS 框就跳过，area 仍显示
-  const empty = panelEl.querySelector('.cssw-empty'); if (empty) empty.hidden = true;
-  renderEditor(lastSelector);
-  editorOpen = true;
-}
-
-// ---- CodeMirror 加载：window.CodeMirror(库)存在则复用；否则从 cdnjs 加载 CM5 ----
-// 学美化编辑脚本(它用 CM5 5.65.15)。关键：只共享"库"(无状态构造器,安全)，
-// 我们自己 new 自己的实例，绝不复用别人的编辑器实例(那正是当年搜索废的坑)。
-const CM_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/';
-let cmLoading = null;
-function ensureCodeMirror() {
-  if (window.CodeMirror) return Promise.resolve(window.CodeMirror);
-  if (cmLoading) return cmLoading;
-  cmLoading = new Promise((resolve) => {
-    try {
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.href = CM_BASE + 'codemirror.min.css';
-      document.head.appendChild(link);
-      const s1 = document.createElement('script');
-      s1.src = CM_BASE + 'codemirror.min.js';
-      s1.onload = () => {
-        const s2 = document.createElement('script');
-        s2.src = CM_BASE + 'mode/css/css.min.js';
-        s2.onload = () => resolve(window.CodeMirror || null);
-        s2.onerror = () => resolve(window.CodeMirror || null); // CSS mode 加载失败也用无高亮 CM
-        document.head.appendChild(s2);
-      };
-      s1.onerror = () => resolve(null);  // 加载失败 → null → 降级纯 textarea
-      document.head.appendChild(s1);
-    } catch (_) { resolve(null); }
-  });
-  return cmLoading;
-}
-
-async function renderEditor(locateSelector) {
-  const step = panelEl.querySelector('.cssw-step-editor');
-  step.innerHTML = `
-    <div class="cssw-editor-searchrow">
-      <input type="text" class="cssw-editor-search" placeholder="搜索定位（回车跳下一个，Shift+回车上一个）" />
-      <button type="button" class="cssw-editor-prev" title="上一个">▲</button>
-      <button type="button" class="cssw-editor-next" title="下一个">▼</button>
-      <button type="button" class="cssw-editor-top" title="回到顶部">⤒</button>
-      <button type="button" class="cssw-editor-bottom" title="到达底部">⤓</button>
-      <span class="cssw-editor-count">0/0</span>
-    </div>
-    <div class="cssw-editor-actions">
-      <button type="button" class="cssw-editor-save">💾 保存</button>
-      <button type="button" class="cssw-editor-undo">↶ 撤回</button>
-      <button type="button" class="cssw-editor-redo">↷ 重做</button>
-      <button type="button" class="cssw-editor-reset">⟲ 重置</button>
-    </div>
-    <div class="cssw-editor-host">
-      <textarea class="cssw-editor-textarea" spellcheck="false"></textarea>
-    </div>
-  `;
-  step.hidden = false;
-
-  const ta = step.querySelector('.cssw-editor-textarea');
-  const searchBox = step.querySelector('.cssw-editor-search');
-  const prevBtn = step.querySelector('.cssw-editor-prev');
-  const nextBtn = step.querySelector('.cssw-editor-next');
-  const topBtn = step.querySelector('.cssw-editor-top');
-  const bottomBtn = step.querySelector('.cssw-editor-bottom');
-  const countEl = step.querySelector('.cssw-editor-count');
-  const saveBtn = step.querySelector('.cssw-editor-save');
-  const undoBtn = step.querySelector('.cssw-editor-undo');
-  const redoBtn = step.querySelector('.cssw-editor-redo');
-  const resetBtn = step.querySelector('.cssw-editor-reset');
-
-  const openBackup = readNativeCSS();
-  ta.value = openBackup;
-
-  // 防抽屉/防冒泡
-  step.addEventListener('mousedown', (e) => e.stopPropagation());
-  step.addEventListener('pointerdown', (e) => e.stopPropagation());
-
-  // 尝试用 CodeMirror 升级；拿不到就用纯 textarea（两条路共用同一套按钮逻辑，靠 ed 抽象层）
-  const CM = await ensureCodeMirror();
-  let cm = null;
-  if (CM) {
-    try {
-      cm = CM(function (elt) { ta.parentNode.replaceChild(elt, ta); }, {
-        value: openBackup,
-        mode: 'css',
-        lineNumbers: true,
-        lineWrapping: true,
-        theme: 'default',
-      });
-    } catch (_) { cm = null; }
-  }
-  step.classList.toggle('cssw-editor-cm', !!cm);
-
-  // 抽象层：不管 CM 还是 textarea，统一 get/set/写回/光标
-  const ed = {
-    get: () => cm ? cm.getValue() : ta.value,
-    set: (v) => { if (cm) cm.setValue(v); else ta.value = v; writeNativeCSS(v); },
-    onChange: (fn) => { if (cm) cm.on('change', fn); else ta.addEventListener('input', fn); },
-    focus: () => { if (cm) cm.focus(); else ta.focus(); },
-    toTop: () => { if (cm) { cm.setCursor({ line: 0, ch: 0 }); cm.scrollTo(0, 0); } else { ta.setSelectionRange(0, 0); ta.scrollTop = 0; } },
-    toBottom: () => {
-      if (cm) { const last = cm.lastLine(); cm.setCursor({ line: last, ch: cm.getLine(last).length }); cm.scrollIntoView({ line: last, ch: 0 }); }
-      else { const end = ta.value.length; ta.setSelectionRange(end, end); ta.scrollTop = ta.scrollHeight; }
-    },
-  };
-
-  // ---- 撤回/重做快照栈 + 自动写回（防抖）----
-  const undoStack = [];
-  const redoStack = [];
-  let lastSnapshot = ed.get();
-  let saveTimer = null;
-  ed.onChange(() => {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      undoStack.push(lastSnapshot);
-      redoStack.length = 0;
-      lastSnapshot = ed.get();
-      writeNativeCSS(ed.get());
-      refreshCount();
-    }, 400);
-  });
-  undoBtn.addEventListener('click', () => {
-    if (!undoStack.length) return;
-    redoStack.push(ed.get());
-    const v = undoStack.pop();
-    ed.set(v); lastSnapshot = v; refreshCount();
-  });
-  redoBtn.addEventListener('click', () => {
-    if (!redoStack.length) return;
-    undoStack.push(ed.get());
-    const v = redoStack.pop();
-    ed.set(v); lastSnapshot = v; refreshCount();
-  });
-  resetBtn.addEventListener('click', () => {
-    undoStack.push(ed.get()); redoStack.length = 0;
-    ed.set(openBackup); lastSnapshot = openBackup;
-    refreshCount(); showToast('已恢复到打开编辑器时');
-  });
-  saveBtn.addEventListener('click', () => {
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-    undoStack.push(lastSnapshot); redoStack.length = 0; lastSnapshot = ed.get();
-    writeNativeCSS(ed.get());
-    const orig = saveBtn.textContent;
-    saveBtn.textContent = '✓ 已保存';
-    saveBtn.classList.add('cssw-saved');
-    setTimeout(() => { saveBtn.textContent = orig; saveBtn.classList.remove('cssw-saved'); }, 1500);
-    showToast('已保存到自定义CSS');
-  });
-  topBtn.addEventListener('click', () => { ed.focus(); ed.toTop(); });
-  bottomBtn.addEventListener('click', () => { ed.focus(); ed.toBottom(); });
-
-  // ---- 搜索：全文扫描记录匹配起点，选中并滚动到匹配处 ----
-  let matchStarts = [];
-  let activeIdx = -1;
-  const collect = () => {
-    matchStarts = [];
-    const kw = searchBox.value;
-    if (!kw) { activeIdx = -1; return; }
-    const text = ed.get();
-    let i = text.indexOf(kw, 0);
-    while (i !== -1) { matchStarts.push(i); i = text.indexOf(kw, i + kw.length); }
-  };
-  const refreshCount = () => {
-    collect();
-    countEl.textContent = searchBox.value ? `${activeIdx >= 0 ? activeIdx + 1 : 0}/${matchStarts.length}` : '0/0';
-  };
-  const gotoMatch = (dir) => {
-    if (!matchStarts.length) { refreshCount(); return; }
-    activeIdx = activeIdx < 0 ? 0 : (activeIdx + dir + matchStarts.length) % matchStarts.length;
-    const idx = matchStarts[activeIdx];
-    const kw = searchBox.value;
-    if (cm) {
-      const from = cm.posFromIndex(idx);
-      const to = cm.posFromIndex(idx + kw.length);
-      cm.setSelection(from, to);
-      cm.scrollIntoView({ from, to }, 60);
-      cm.focus();
-    } else {
-      ta.focus();
-      ta.setSelectionRange(idx, idx + kw.length);
-      const line = ed.get().slice(0, idx).split('\n').length - 1;
-      const lh = parseFloat(getComputedStyle(ta).lineHeight) || 18;
-      ta.scrollTop = Math.max(0, line * lh - ta.clientHeight / 2);
-    }
-    countEl.textContent = `${activeIdx + 1}/${matchStarts.length}`;
-  };
-  searchBox.addEventListener('input', () => { activeIdx = -1; refreshCount(); });
-  searchBox.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); gotoMatch(e.shiftKey ? -1 : 1); }
-  });
-  nextBtn.addEventListener('click', () => gotoMatch(1));
-  prevBtn.addEventListener('click', () => gotoMatch(-1));
-
-  refreshCount();
-
-  // 点选后定位：搜元素现状的具体 css 值(如 color:rgb(...))，比搜类名精准得多(#2)。
-  // 只标记提示、不强制跳转(#1：不再自动把用户甩到匹配处)。找到就把搜索词填好，用户按回车才跳。
-  if (locateSelector) {
-    const needle = locateCssNeedle();
-    if (needle && ed.get().indexOf(needle) !== -1) {
-      searchBox.value = needle;
-      refreshCount();
-      showLocateHint(`在你的自定义CSS里找到了相关样式（搜索词已填好 “${needle}”，按回车跳过去）。`, false);
-    } else {
-      showLocateHint('没在你的自定义CSS里找到这个元素的相关样式——可能作者没写过，或它由主题外部文件控制。你可以自己新写一条，或点下面「生成提问问 AI」。', true);
-    }
-  }
-}
-
-// 从当前元素现状里挑一个"适合当搜索词的具体 css 值"：优先独特的颜色/尺寸值，而非类名。
-function locateCssNeedle() {
-  const comp = (lastAnalysis && lastAnalysis.computed) || {};
-  // 优先能精确定位的属性值
-  for (const k of ['background-color', 'color', 'border-radius', 'width', 'height', 'font-size']) {
-    const v = comp[k];
-    if (v && v !== '0px' && v !== 'auto' && v !== 'rgba(0, 0, 0, 0)' && !v.startsWith('rgb(0, 0, 0)')) {
-      return v;  // 用值本身当搜索词（如 "14px" "rgb(51, 51, 51)"）
-    }
-  }
-  return '';
-}
-
-// 编辑器顶部的定位提示条（found=false 时是"没找到"的橙色提示）
-function showLocateHint(text, notFound) {
-  const step = panelEl.querySelector('.cssw-step-editor');
-  if (!step) return;
-  let hint = step.querySelector('.cssw-editor-tip');
-  if (!hint) {
-    hint = document.createElement('div');
-    hint.className = 'cssw-editor-tip';
-    step.insertBefore(hint, step.firstChild);
-  }
-  hint.textContent = text;
-  hint.classList.toggle('cssw-editor-tip-warn', !!notFound);
-}
 
 /* ============ 区域：区域名 + 精确选择器(可复制) + 现状 + 层级链 + 诉求输入 ============ */
 function renderArea() {
@@ -620,6 +364,13 @@ function renderArea() {
   const selHtml = lastSelector
     ? `<div class="cssw-sel-row"><code class="cssw-sel-code">${escapeHtml(lastSelector)}</code><button type="button" class="cssw-sel-copy" title="复制选择器">📋</button></div>`
     : '';
+
+  // 主题/自定义CSS 里有没有针对这里的代码（搜元素的 id/class 锚点，一行短提示）
+  const has = customCssHasRule(el);
+  const codeHtml = has
+    ? `<div class="cssw-has cssw-has-yes">✅ 你的自定义CSS里已有相关代码，可改现成的</div>`
+    : `<div class="cssw-has cssw-has-no">⚠️ 自定义CSS里还没写这里，需要新加一条</div>`;
+
   // 现状摘要（最多列几条常用的，避免太长）
   const comp = lastAnalysis && lastAnalysis.computed ? lastAnalysis.computed : {};
   const compKeys = Object.keys(comp).slice(0, 6);
@@ -633,6 +384,7 @@ function renderArea() {
       <div class="cssw-area-name">${escapeHtml(info.name)}</div>
       ${noteHtml}
       ${selHtml}
+      ${codeHtml}
       ${chainHtml}
     </div>
     ${compHtml}
@@ -666,8 +418,6 @@ function renderArea() {
     btn.addEventListener('click', () => {
       chainIndex = parseInt(btn.getAttribute('data-idx'), 10) || 0;
       renderArea();
-      // 切层后重新定位编辑器
-      if (editorOpen) openEditorAndLocate();
     });
   });
 }
@@ -736,6 +486,25 @@ function safeReadNativeCSS() {
   try { return readNativeCSS() || ''; } catch (_) { return ''; }
 }
 
+// 判断"自定义CSS里有没有针对这里的代码"：在 #customCSS 全文里找元素(及父级1-2层)的
+// id / 有意义 class 锚点。搜锚点而非 computed 值——伪元素文案/类选择器写的规则，computed 值对不上，
+// 但源码里必然含它的 class/id。父级也搜：伪元素假文字常写在父容器选择器上。
+function customCssHasRule(el) {
+  const css = safeReadNativeCSS();
+  if (!css) return false;
+  const anchors = new Set();
+  let node = el;
+  for (let d = 0; d <= 2 && node && node !== document.body; d++) {
+    if (node.id) anchors.add('#' + node.id);
+    try { node.classList.forEach((c) => { if (!c.startsWith('cssw-')) anchors.add('.' + c); }); } catch (_) {}
+    node = node.parentElement;
+  }
+  for (const a of anchors) {
+    if (a.length > 2 && css.indexOf(a) !== -1) return true;
+  }
+  return false;
+}
+
 function renderResult(text) {
   const step = panelEl.querySelector('.cssw-step-result');
   step.innerHTML = `
@@ -761,9 +530,7 @@ function restartAll() {
   containerChain = [];
   chainIndex = 0;
   hideStep('.cssw-step-area');
-  hideStep('.cssw-step-editor');
   hideStep('.cssw-step-result');
-  editorOpen = false;
   hideFooter();
   hidePersistentHighlight();
   const empty = panelEl.querySelector('.cssw-empty');
