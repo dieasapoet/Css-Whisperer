@@ -334,7 +334,8 @@ function onElementPicked(el) {
   hideStep('.cssw-step-result');
   const empty = panelEl.querySelector('.cssw-empty'); if (empty) empty.hidden = true;
   expandPanel();
-  renderArea();
+  renderArea();       // 极简一屏：区域名 + 选择器(可复制) + 有无对应代码 + 诉求框 + 层级链
+  showFooter();
 }
 
 
@@ -365,26 +366,23 @@ function renderArea() {
     : '';
 
   // 从 customCSS 全文里挖出"含这个元素"的相关规则原文，直接显示 + 给搜索词。
-  // 单段显示，翻页按钮。
+  // 默认只显前 2 段，其余折叠进 <details>，整区限高滚动，绝不挤走底部按钮。
   const rules = findRelatedRules(el);
   let codeHtml;
   if (rules.length) {
-    const total = rules.length;
     const renderRule = (r) => `<div class="cssw-rule">`
       + `<pre class="cssw-rule-code">${escapeHtml(r.text)}</pre>`
-      + `<div class="cssw-rule-find"><span>去编辑器搜：</span><code>${escapeHtml(r.needle)}</code><button type="button" class="cssw-rule-copy" data-needle="${escapeHtml(r.needle)}" title="复制搜索词">📋</button></div>`
+      + (r.resolvedNote ? `<div class="cssw-rule-var-note">🔍 变量实际值：${escapeHtml(r.resolvedNote)}</div>` : '')
+      + `<div class="cssw-rule-find"><span>搜这段定位：</span><code>${escapeHtml(r.needle)}</code><button type="button" class="cssw-rule-copy" data-needle="${escapeHtml(r.needle)}" title="复制搜索词">📋</button></div>`
       + `</div>`;
-    codeHtml = `<div class="cssw-rules"><div class="cssw-rules-head"><span>相关代码</span>`
-      + `<span class="cssw-rule-page"><button type="button" class="cssw-rule-nav" data-dir="-1"${total>1?'':' hidden disabled'}>‹</button>`
-      + `<span class="cssw-rule-count">1/${total}</span>`
-      + `<button type="button" class="cssw-rule-nav" data-dir="1"${total>1?'':' hidden disabled'}>›</button></span></div>`
-      + `<div class="cssw-rule-slot">${renderRule(rules[0])}</div></div>`;
-    ruleList = rules;
-    ruleIdx = 0;
+    const head = rules.slice(0, 2).map(renderRule).join('');
+    const rest = rules.slice(2);
+    const restHtml = rest.length
+      ? `<details class="cssw-rules-more"><summary>还有 ${rest.length} 段，展开看</summary>${rest.map(renderRule).join('')}</details>`
+      : '';
+    codeHtml = `<div class="cssw-rules"><div class="cssw-rules-title">📄 自定义CSS里和这里相关的代码（${rules.length} 段）：</div>${head}${restHtml}</div>`;
   } else {
     codeHtml = `<div class="cssw-has cssw-has-no">⚠️ 自定义CSS里还没写这里，需新加一条（点下面生成提问让 AI 帮你写）</div>`;
-    ruleList = [];
-    ruleIdx = 0;
   }
 
   // 现状摘要（最多列几条常用的，避免太长）
@@ -399,22 +397,15 @@ function renderArea() {
       <div class="cssw-area-label">正在改</div>
       <div class="cssw-area-name">${escapeHtml(info.name)}</div>
       ${noteHtml}
-      ${chainHtml}
       ${selHtml}
       ${codeHtml}
+      ${chainHtml}
     </div>
+    ${compHtml}
     <div class="cssw-card">
-      <label class="cssw-q" for="cssw-usertext">怎么改，一句话</label>
-      <textarea id="cssw-usertext" class="cssw-usertext" rows="1" placeholder="字大点、背景透明、加圆角">${escapeHtml(userText)}</textarea>
+      <label class="cssw-q" for="cssw-usertext">你想把它改成什么样？（一句话，可留空）</label>
+      <textarea id="cssw-usertext" class="cssw-usertext" rows="2" placeholder="例如：字大一点、背景透明些、加个圆角">${escapeHtml(userText)}</textarea>
     </div>
-    <div class="cssw-tab-bar">
-      <button type="button" class="cssw-tab active" data-tab="locate">定位</button>
-      <button type="button" class="cssw-tab" data-tab="prompt">提示词</button>
-    </div>
-    <div class="cssw-tab-content" data-tab="locate">
-      <button type="button" class="cssw-gen-btn">生成提问问 AI</button>
-    </div>
-    <div class="cssw-tab-content" data-tab="prompt" hidden></div>
   `;
   step.hidden = false;
 
@@ -447,68 +438,6 @@ function renderArea() {
       renderArea();
     });
   });
-
-  // 翻页按钮
-  step.querySelectorAll('.cssw-rule-nav').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const dir = parseInt(btn.getAttribute('data-dir'), 10) || 1;
-      if (!ruleList.length) return;
-      ruleIdx = (ruleIdx + dir + ruleList.length) % ruleList.length;
-      renderRuleSlot();
-    });
-  });
-
-  // Tab 切换
-  step.querySelectorAll('.cssw-tab').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const want = btn.getAttribute('data-tab');
-      step.querySelectorAll('.cssw-tab').forEach(b => b.classList.toggle('active', b===btn));
-      step.querySelectorAll('.cssw-tab-content').forEach(p => p.hidden = p.getAttribute('data-tab')!==want);
-      currentTab = want;
-    });
-  });
-
-  // 底部生成按钮
-  const genBtn = step.querySelector('.cssw-gen-btn');
-  if (genBtn) genBtn.addEventListener('click', onGenerate);
-}
-
-// 切换 tab
-function showTab(name) {
-  const step = panelEl?.querySelector('.cssw-step-area');
-  if (!step) return;
-  step.querySelectorAll('.cssw-tab').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab')===name));
-  step.querySelectorAll('.cssw-tab-content').forEach(p => p.hidden = p.getAttribute('data-tab')!==name);
-  currentTab = name;
-}
-
-// 提示词 tab 的结果区
-function renderResultTab(text) {
-  const panel = panelEl.querySelector('.cssw-tab-content[data-tab="prompt"]');
-  if (!panel) return;
-  panel.innerHTML = `
-    <textarea class="cssw-result-text" readonly>${escapeHtml(text)}</textarea>
-    <button type="button" class="cssw-copy-btn">📋 一键复制</button>
-    <button type="button" class="cssw-restart-btn">🔄 全部清空，重新开始</button>
-  `;
-  const copyBtn = panel.querySelector('.cssw-copy-btn');
-  copyBtn.addEventListener('click', () => copyText(text, copyBtn));
-  panel.querySelector('.cssw-restart-btn').addEventListener('click', restartAll);
-}
-
-// 渲染"相关规则"区的当前段
-function renderRuleSlot() {
-  const slot = panelEl?.querySelector('.cssw-rule-slot');
-  if (!slot || !ruleList.length) return;
-  const r = ruleList[ruleIdx] || ruleList[0];
-  slot.innerHTML = `<div class="cssw-rule">`
-    + `<pre class="cssw-rule-code">${escapeHtml(r.text)}</pre>`
-    + `<div class="cssw-rule-find"><span>去编辑器搜：</span><code>${escapeHtml(r.needle)}</code><button type="button" class="cssw-rule-copy" title="复制搜索词">📋</button></div>`
-    + `</div>`;
-  const copyBtn = slot.querySelector('.cssw-rule-copy');
-  if (copyBtn) copyBtn.addEventListener('click', () => copyText(r.needle, copyBtn));
-  const cnt = slot.closest('.cssw-rules')?.querySelector('.cssw-rule-count');
-  if (cnt) cnt.textContent = `${ruleIdx + 1}/${ruleList.length}`;
 }
 
 /* ============ 当前选中元素持续高亮 ============ */
@@ -575,30 +504,48 @@ function safeReadNativeCSS() {
   try { return readNativeCSS() || ''; } catch (_) { return ''; }
 }
 
-// 从 #customCSS 全文里挖出"选择器含这个元素 id/class"的规则段，整段返回。
+// Font Awesome / 通用图标类 —— 全站几十处都用，做锚点会命中大量无关规则
+const FA_CLASSES = new Set([
+  'fa-solid', 'fa-regular', 'fa-brands', 'fa-light', 'fa-thin', 'fa-duotone',
+  'fa-fw', 'fa-xs', 'fa-sm', 'fa-lg', 'fa-xl', 'fa-2xl',
+  'fa-border', 'fa-pull-left', 'fa-pull-right', 'fa-spin', 'fa-pulse',
+  'fa-flip', 'fa-flip-both', 'fa-flip-horizontal', 'fa-flip-vertical',
+  'fa-bounce', 'fa-shake', 'fa-beat', 'fa-beat-fade', 'fa-fade',
+  'fa-stack', 'fa-stack-1x', 'fa-stack-2x', 'fa-inverse',
+  'interactable',
+]);
+
+// 从 #customCSS 全文里挖出"选择器含这个元素 id/class"的规则段，按相关度排序返回。
 // 精准策略：优先只用【元素自身】的锚点找；自身一段都没有时，才回退到父级
 // （伪元素假文字常写在父容器上），且父级排除 .mes 这类大众容器类，避免命中一大堆。
+// v0.9.4+ 评分排序：伪元素 content 规则排前，全局规则/通用锚点沉底。
 function findRelatedRules(el) {
   const css = safeReadNativeCSS();
   if (!css) return [];
 
-  // 自身锚点
+  // 自身锚点（排除 Font Awesome / ST 通用交互类）
   const selfAnchors = [];
   if (el.id) selfAnchors.push('#' + el.id);
-  try { el.classList.forEach((c) => { if (!c.startsWith('cssw-') && c.length > 1) selfAnchors.push('.' + c); }); } catch (_) {}
+  try { el.classList.forEach((c) => { if (!c.startsWith('cssw-') && c.length > 1 && !FA_CLASSES.has(c)) selfAnchors.push('.' + c); }); } catch (_) {}
 
-  // 父级锚点（1-2 层，排除大众容器类，只留 id 和较独特的 class）
+  // 父级锚点（1-2 层，排除大众容器类 + FA，只留 id 和较独特的 class）
   const parentAnchors = [];
   let node = el.parentElement;
   for (let d = 1; d <= 2 && node && node !== document.body; d++) {
     if (node.id) parentAnchors.push('#' + node.id);
-    try { node.classList.forEach((c) => { if (!c.startsWith('cssw-') && c.length > 1 && !COMMON_CONTAINER_CLASSES.has(c)) parentAnchors.push('.' + c); }); } catch (_) {}
+    try { node.classList.forEach((c) => { if (!c.startsWith('cssw-') && c.length > 1 && !COMMON_CONTAINER_CLASSES.has(c) && !FA_CLASSES.has(c)) parentAnchors.push('.' + c); }); } catch (_) {}
     node = node.parentElement;
   }
 
+  // 预计算每个锚点在 CSS 全文中的出现次数（用于判断通用类惩罚）
+  const anchorFreq = new Map();
+  for (const a of [...selfAnchors, ...parentAnchors]) {
+    if (!anchorFreq.has(a)) anchorFreq.set(a, countInCss(css, a));
+  }
+
   // 先用自身；命中为空再用父级
-  let rules = extractRules(css, selfAnchors);
-  if (!rules.length) rules = extractRules(css, parentAnchors);
+  let rules = extractRules(css, selfAnchors, anchorFreq, false);
+  if (!rules.length) rules = extractRules(css, parentAnchors, anchorFreq, true);
   return rules;
 }
 
@@ -609,7 +556,7 @@ const COMMON_CONTAINER_CLASSES = new Set([
   'drawer-content', 'wide100p', 'alignItemsCenter', 'justifySpaceBetween',
 ]);
 
-function extractRules(css, anchors) {
+function extractRules(css, anchors, anchorFreq, isParentFallback) {
   if (!anchors || !anchors.length) return [];
   const out = [];
   const seen = new Set();
@@ -619,32 +566,84 @@ function extractRules(css, anchors) {
     const selector = m[1].trim().replace(/^[\s\S]*?\*\//, '').trim();
     const body = m[2].trim();
     if (!selector || selector.startsWith('@')) continue;
-    // 优先：伪元素含文案的规则（包括 var(--xxx)），直接用 content 文案做搜索词
-    const isPseudo = /::?(before|after)/.test(selector);
-    const hasContent = body.match(/content\s*:\s*(var\([^)]*\)|["'][^"']*["'])/);
-    if (isPseudo && hasContent) {
-      const full = `${selector} { ${body} }`;
-      if (seen.has(full)) continue;
-      seen.add(full);
-      const needle = deriveNeedle(selector, body, selector, css);
-      out.push({ text: shorten(full, 400), needle, score: 95 });
-      continue;
-    }
-    // 其次：类名/ID 锚点匹配
     const hit = anchors.find((a) => selectorHasAnchor(selector, a));
     if (!hit) continue;
     const full = `${selector} { ${body} }`;
     if (seen.has(full)) continue;
     seen.add(full);
-    let score = 0;
-    if (isPseudo) score += 10;
-    const idx = selector.lastIndexOf(hit);
-    score += selector.length - idx;
-    if (selector.length < 40) score += 10;
-    out.push({ text: shorten(full, 400), needle: deriveNeedle(selector, body, hit, css), score });
+
+    // 派生搜索词时顺便解析 var() → 真实值，供面板展示
+    let resolvedNote = '';
+    const contentMatch = body.match(/content\s*:\s*(var\(--[\w-]+\))/);
+    if (contentMatch) {
+      const vn = contentMatch[1].match(/var\((--[\w-]+)\)/);
+      if (vn) { const val = resolveVarValue(vn[1]); if (val) resolvedNote = val; }
+    }
+
+    out.push({
+      text: shorten(full, 400),
+      needle: deriveNeedle(selector, body, hit),
+      score: scoreRule(selector, body, hit, isParentFallback, anchorFreq),
+      resolvedNote,
+    });
   }
   out.sort((a, b) => b.score - a.score);
   return out;
+}
+
+// 给一段规则打分，分值越高＝越相关（越值得排前面给用户看）。
+// 正向：伪元素 content 最独特(＋100) / 锚点是"主角"(＋50) / ID 锚点(＋20)
+// 负向：多选择器合并(－30～－50) / html/body 全局基底(－40) / 父级回退(－20) / 锚点出现太频繁(－30)
+function scoreRule(selector, body, anchor, isParentFallback, anchorFreq) {
+  let score = 0;
+
+  // +++ 加分 +++
+  // 伪元素 content 是用户改文字/图标的最直接目标，登顶
+  if (/content\s*:/.test(body)) score += 100;
+
+  // 锚点出现在选择器最后一个逗号段中 → 锚点是这条规则的"主角"，不是顺带提到
+  const parts = selector.split(',');
+  const lastPart = parts[parts.length - 1].trim();
+  const anchorPos = lastPart.indexOf(anchor);
+  // 锚点在最开头，或者前面只有组合子（空格/>/+/~）
+  if (anchorPos === 0 || (anchorPos > 0 && /^[\s>+~]+$/.test(lastPart.slice(0, anchorPos)))) {
+    score += 50;
+  }
+
+  // ID 比 class 更精准
+  if (anchor.startsWith('#')) score += 20;
+
+  // --- 扣分 ---
+  // 多选择器合并 = 全局性/通用规则，不是针对这一个元素的
+  if (parts.length >= 5) score -= 50;
+  else if (parts.length >= 3) score -= 30;
+
+  // 第一条选择器以 html/body 开头 → 整站 reset
+  const firstSelector = parts[0].trim();
+  if (/^(html|body|:root)(\s|:|$)/.test(firstSelector) || firstSelector === 'html' || firstSelector === 'body') {
+    score -= 40;
+  }
+
+  // 父级回退 → 不如自身锚点可靠
+  if (isParentFallback) score -= 20;
+
+  // 锚点是"通用类"——在全文出现超过 8 次 → 说明这个 class 被大量不同上下文使用，非精准
+  const freq = (anchorFreq && anchorFreq.get(anchor)) || 0;
+  if (freq > 8) score -= 30;
+
+  return score;
+}
+
+// 统计锚点在 CSS 全文中出现在选择器里的次数（简单子串匹配 + 边界检查）
+function countInCss(css, anchor) {
+  let count = 0;
+  let idx = 0;
+  while ((idx = css.indexOf(anchor, idx)) !== -1) {
+    const after = css[idx + anchor.length];
+    if (after === undefined || /[\s.#:>,+~\{\[\"]/.test(after)) count++;
+    idx++;
+  }
+  return count;
 }
 
 // 选择器里是否把锚点当作完整 token 出现（前后是边界符，不是别的类名的一部分）
@@ -655,33 +654,39 @@ function selectorHasAnchor(selector, anchor) {
   return after === undefined || /[\s.#:>,+~\[]/.test(after);
 }
 
-// 给一段规则挑个"独一无二、好搜"的搜索词：优先 content 的文案，否则用带锚点的选择器串
-// 如果 content 是 var(--xxx)，会尝试在CSS里解析这个变量的真实值
-function deriveNeedle(selector, body, anchor, css) {
-  const cm = body.match(/content\s*:\s*(var\([^)]*\))/);
+// 给一段规则挑个"独一无二、好搜"的搜索词：优先 content 的实际文案。
+// content 是 var(--textN) 时，用解析出的真实值做搜索词——用户搜"永远爱你是我说过"才能定位到。
+function deriveNeedle(selector, body, anchor) {
+  const cm = body.match(/content\s*:\s*(["'][^"']*["']|var\([^)]*\))/);
   if (cm) {
-    // 尝试解析 var() 的真实值
-    const resolved = resolveVarValue(cm[1], css);
-    if (resolved) return `content: ${resolved}`;
-    return `content: ${cm[1]}`;
+    const contentVal = cm[1];
+    // 直写文案且有内容：content: "曲名" → 搜 "曲名"
+    if (/^["']/.test(contentVal) && contentVal.length > 2) return contentVal;
+    // var(--textN)：搜解析出的真实值
+    if (/^var\(--/.test(contentVal)) {
+      const vn = contentVal.match(/var\((--[\w-]+)\)/);
+      if (vn) {
+        const val = resolveVarValue(vn[1]);
+        if (val) return val;
+      }
+    }
+    // 空字符串或无法解析的 var，不勉强，走选择器路线
   }
-  const cmStatic = body.match(/content\s*:\s*(["'][^"']*["'])/);
-  if (cmStatic) return `content: ${cmStatic[1]}`;
-  // 否则取包含锚点的那一段选择器（如 .mesIDDisplay::before）
+  // 取包含锚点的那一段选择器（如 .mesIDDisplay::before）
   const seg = selector.split(',').find((s) => s.includes(anchor)) || selector;
   return seg.trim().slice(0, 60);
 }
 
-// 从CSS全文里解析 var(--xxx) 的真实值
-// 例如：--text2: '永远爱你是我说过'; 返回 '永远爱你是我说过'
-function resolveVarValue(varExpr, css) {
-  const nameMatch = varExpr.match(/--[\w-]+/);
-  if (!nameMatch) return null;
-  const varname = nameMatch[0];
-  // 搜 :root 里的定义：{ ... --text2: 'xxx'; ... }
-  const re = new RegExp(varname + '\\s*:\\s*["\']([^"\']+)["\']', 'i');
-  const m = css.match(re);
-  return m ? m[1] : null;
+// 从 CSS 全文解析 :root 或自定义属性定义块中某个 --var 的值
+// 如 --text2: '永远爱你是我说过' → 返回 "'永远爱你是我说过'"
+function resolveVarValue(varName) {
+  const css = safeReadNativeCSS();
+  if (!css) return '';
+  const rootBlock = css.match(/:root\s*\{[^}]*\}/s);
+  const haystack = rootBlock ? rootBlock[0] : css;
+  const re = new RegExp(varName + '\\s*:\\s*(\'[^\']*\'|"[^"]*")');
+  const m = haystack.match(re);
+  return m ? m[1] : '';
 }
 
 function shorten(s, n) { return s.length > n ? s.slice(0, n) + ' …' : s; }
