@@ -365,11 +365,19 @@ function renderArea() {
     ? `<div class="cssw-sel-row"><code class="cssw-sel-code">${escapeHtml(lastSelector)}</code><button type="button" class="cssw-sel-copy" title="复制选择器">📋</button></div>`
     : '';
 
-  // 主题/自定义CSS 里有没有针对这里的代码（搜元素的 id/class 锚点，一行短提示）
-  const has = customCssHasRule(el);
-  const codeHtml = has
-    ? `<div class="cssw-has cssw-has-yes">✅ 你的自定义CSS里已有相关代码，可改现成的</div>`
-    : `<div class="cssw-has cssw-has-no">⚠️ 自定义CSS里还没写这里，需要新加一条</div>`;
+  // 从 customCSS 全文里挖出"含这个元素(及父级)"的相关规则原文，直接显示 + 给搜索词
+  const rules = findRelatedRules(el);
+  let codeHtml;
+  if (rules.length) {
+    codeHtml = `<div class="cssw-rules"><div class="cssw-rules-title">📄 你的自定义CSS里，和这里相关的代码（${rules.length} 段）：</div>`
+      + rules.map((r) => `<div class="cssw-rule">`
+        + `<pre class="cssw-rule-code">${escapeHtml(r.text)}</pre>`
+        + `<div class="cssw-rule-find"><span>去编辑器里搜这段定位：</span><code>${escapeHtml(r.needle)}</code><button type="button" class="cssw-rule-copy" data-needle="${escapeHtml(r.needle)}" title="复制搜索词">📋</button></div>`
+        + `</div>`).join('')
+      + `</div>`;
+  } else {
+    codeHtml = `<div class="cssw-has cssw-has-no">⚠️ 你的自定义CSS里还没写这里的样式，需要新加一条（点下面生成提问让 AI 帮你写）</div>`;
+  }
 
   // 现状摘要（最多列几条常用的，避免太长）
   const comp = lastAnalysis && lastAnalysis.computed ? lastAnalysis.computed : {};
@@ -406,6 +414,10 @@ function renderArea() {
 
   const selCopy = step.querySelector('.cssw-sel-copy');
   if (selCopy) selCopy.addEventListener('click', () => copyText(lastSelector, selCopy));
+
+  step.querySelectorAll('.cssw-rule-copy').forEach((btn) => {
+    btn.addEventListener('click', () => copyText(btn.getAttribute('data-needle') || '', btn));
+  });
 
   const ut = step.querySelector('.cssw-usertext');
   if (ut) {
@@ -486,24 +498,62 @@ function safeReadNativeCSS() {
   try { return readNativeCSS() || ''; } catch (_) { return ''; }
 }
 
-// 判断"自定义CSS里有没有针对这里的代码"：在 #customCSS 全文里找元素(及父级1-2层)的
-// id / 有意义 class 锚点。搜锚点而非 computed 值——伪元素文案/类选择器写的规则，computed 值对不上，
-// 但源码里必然含它的 class/id。父级也搜：伪元素假文字常写在父容器选择器上。
-function customCssHasRule(el) {
+// 从 #customCSS 全文里挖出"选择器含这个元素(或父级1-2层)id/class"的规则段，整段返回。
+// 搜锚点(class/id)而非 computed 值——伪元素文案/类选择器/var() 写的规则，computed 对不上，
+// 但源码选择器里必然含它的 class/id。父级也搜：伪元素假文字常写在父容器选择器上。
+function findRelatedRules(el) {
   const css = safeReadNativeCSS();
-  if (!css) return false;
-  const anchors = new Set();
+  if (!css) return [];
+
+  // 收集锚点：元素自身 + 父级 1-2 层 的 id / 有意义 class
+  const anchors = [];
   let node = el;
   for (let d = 0; d <= 2 && node && node !== document.body; d++) {
-    if (node.id) anchors.add('#' + node.id);
-    try { node.classList.forEach((c) => { if (!c.startsWith('cssw-')) anchors.add('.' + c); }); } catch (_) {}
+    if (node.id) anchors.push('#' + node.id);
+    try { node.classList.forEach((c) => { if (!c.startsWith('cssw-') && c.length > 1) anchors.push('.' + c); }); } catch (_) {}
     node = node.parentElement;
   }
-  for (const a of anchors) {
-    if (a.length > 2 && css.indexOf(a) !== -1) return true;
+  if (!anchors.length) return [];
+
+  // 把 customCSS 切成一条条规则块（selector { ... }），只保留选择器命中锚点的
+  const out = [];
+  const seen = new Set();
+  const re = /([^{}]+)\{([^{}]*)\}/g;
+  let m;
+  while ((m = re.exec(css)) !== null && out.length < 8) {
+    const selector = m[1].trim().replace(/^[\s\S]*?\*\//, '').trim(); // 去掉规则前残留的注释尾
+    const body = m[2].trim();
+    if (!selector || selector.startsWith('@')) continue;
+    // 选择器里是否含任一锚点（作为完整 token，避免 .mes 命中 .message）
+    const hit = anchors.find((a) => selectorHasAnchor(selector, a));
+    if (!hit) continue;
+    const full = `${selector} { ${body} }`;
+    if (seen.has(full)) continue;
+    seen.add(full);
+    out.push({ text: shorten(full, 400), needle: deriveNeedle(selector, body, hit) });
   }
-  return false;
+  return out;
 }
+
+// 选择器里是否把锚点当作完整 token 出现（前后是边界符，不是别的类名的一部分）
+function selectorHasAnchor(selector, anchor) {
+  const i = selector.indexOf(anchor);
+  if (i === -1) return false;
+  const after = selector[i + anchor.length];
+  return after === undefined || /[\s.#:>,+~\[]/.test(after);
+}
+
+// 给一段规则挑个"独一无二、好搜"的搜索词：优先 content 的文案，否则用带锚点的选择器串
+function deriveNeedle(selector, body, anchor) {
+  const cm = body.match(/content\s*:\s*(["'][^"']*["']|var\([^)]*\))/);
+  if (cm) return `content: ${cm[1]}`;   // 伪元素文案：content: "曲名" —— 最独特
+  // 否则取包含锚点的那一段选择器（如 .mesIDDisplay::before）
+  const seg = selector.split(',').find((s) => s.includes(anchor)) || selector;
+  return seg.trim().slice(0, 60);
+}
+
+function shorten(s, n) { return s.length > n ? s.slice(0, n) + ' …' : s; }
+
 
 function renderResult(text) {
   const step = panelEl.querySelector('.cssw-step-result');

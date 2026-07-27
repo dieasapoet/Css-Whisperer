@@ -273,11 +273,64 @@
 }
 
 /* ========================================
- * 有没有对应代码 一行提示
+ * 有没有对应代码 / 相关规则原文
  * ======================================== */
 .cssw-has { margin-top: 8px; font-size: 12.5px; line-height: 1.4; }
 .cssw-has-yes { color: var(--tt-success); }
 .cssw-has-no { color: var(--tt-danger); }
+
+/* 相关规则原文展示（从 customCSS 挖出的段落 + 搜索词） */
+.cssw-rules { margin-top: 8px; }
+.cssw-rules-title { font-size: 12.5px; color: var(--tt-text-secondary); margin-bottom: 6px; }
+.cssw-rule {
+  margin-bottom: 8px;
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-btn);
+  overflow: hidden;
+}
+.cssw-rule-code {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 120px;
+  overflow: auto;
+  background: var(--tt-input-bg);
+  color: var(--tt-text);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cssw-rule-find {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-top: 1px solid var(--tt-border);
+  background: var(--tt-card-bg);
+  font-size: 11.5px;
+  color: var(--tt-text-tertiary);
+}
+.cssw-rule-find span { flex: 0 0 auto; }
+.cssw-rule-find code {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  color: var(--tt-accent);
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.cssw-rule-copy {
+  flex: 0 0 auto;
+  width: 26px; height: 26px;
+  background: transparent;
+  border: 1px solid var(--tt-border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.cssw-rule-copy:hover { background: rgba(128,128,128,0.12); }
+.cssw-rule-copy.cssw-copied { background: var(--tt-accent); border-color: var(--tt-accent); }
 
 /* 精确选择器展示行 + 复制 */
 .cssw-sel-row {
