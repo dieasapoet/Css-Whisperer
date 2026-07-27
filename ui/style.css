@@ -111,9 +111,12 @@
 
 @media (max-width: 480px) {
   .cssw-panel {
-    top: 6vh;
-    max-height: 88vh;
+    top: 5vh;
+    width: 92vw;
+    max-height: 80vh;   /* 不占满全屏，露出底部让用户知道下面还有页面(#6) */
   }
+  /* 手机上编辑器矮一点，别一开就吃掉半屏 */
+  .cssw-editor-host { height: 240px; }
 }
 
 /* ========================================
@@ -375,83 +378,51 @@
   border-radius: var(--tt-radius-btn);
 }
 
-/* 编辑区 textarea（镜像 #customCSS；搜索用原生 setSelectionRange 选中，不叠层→不抖） */
-/* 编辑区：透明 textarea 叠在 hljs 高亮层之上（共用完全相同的字体度量以逐像素对齐） */
+/* 编辑区容器：CodeMirror 撑满；无 CM 时退化为纯 textarea */
 .cssw-editor-host {
   position: relative;
   margin-bottom: 6px;
-  height: 260px;
-  resize: vertical;
-  overflow: hidden;
+  height: 300px;
   border: 1px solid var(--tt-border);
   border-radius: var(--tt-radius-card);
+  overflow: hidden;
   background: var(--tt-input-bg);
 }
-/* 共用度量：高亮层和 textarea 必须完全一致，否则字符错位 */
-.cssw-editor-highlight,
+/* 纯 textarea 后备（CM 加载失败时） */
 .cssw-editor-textarea {
-  margin: 0;
-  padding: 10px;
-  border: 0;
+  display: block;
   width: 100%;
   height: 100%;
+  padding: 10px;
+  margin: 0;
+  border: 0;
   box-sizing: border-box;
+  background: var(--tt-input-bg);
+  color: var(--tt-text);
   font-size: 12.5px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
-  overflow-wrap: anywhere;
-  tab-size: 2;
-}
-/* 底层高亮（只读展示，不接收事件） */
-.cssw-editor-highlight {
-  position: absolute;
-  inset: 0;
-  margin: 0;
-  overflow: auto;
-  pointer-events: none;
-  background: transparent;
-  color: var(--tt-text);
-  z-index: 1;
-}
-.cssw-editor-highlight code {
-  font: inherit;
-  white-space: inherit;
-  word-break: inherit;
-  background: transparent;
-  padding: 0;
-}
-/* 上层可编辑 textarea：有高亮时文字透明只留光标；无 hljs 时（无 has-hl 类）文字正常显示 */
-.cssw-editor-textarea {
-  position: relative;
-  display: block;
-  z-index: 2;
-  background: transparent;
-  color: var(--tt-text);
-  caret-color: var(--tt-accent);
   resize: none;
-  overflow: auto;
 }
-.cssw-editor-has-hl .cssw-editor-textarea {
-  color: transparent;
-  -webkit-text-fill-color: transparent;
+/* CodeMirror 实例填满容器 + 跟随皮肤配色 */
+.cssw-editor-host .CodeMirror {
+  height: 100%;
+  font-size: 12.5px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  line-height: 1.5;
+  background: var(--tt-input-bg);
+  color: var(--tt-text);
 }
-.cssw-editor-textarea::selection { background: rgba(217, 119, 87, 0.3); }
+.cssw-editor-host .CodeMirror-gutters {
+  background: var(--tt-card-bg);
+  border-right: 1px solid var(--tt-border);
+}
+.cssw-editor-host .CodeMirror-linenumber { color: var(--tt-text-tertiary); }
+.cssw-editor-host .CodeMirror-cursor { border-left-color: var(--tt-accent); }
+.cssw-editor-host .CodeMirror-selected { background: rgba(217, 119, 87, 0.25) !important; }
 .cssw-editor-loading { font-size: 12px; color: var(--tt-text-tertiary); padding: 4px 2px; }
-
-/* hljs 高亮配色（跟随皮肤，覆盖 hljs 默认主题的背景，只取前景色） */
-.cssw-editor-highlight .hljs-attribute,
-.cssw-editor-highlight .hljs-selector-tag,
-.cssw-editor-highlight .hljs-selector-class,
-.cssw-editor-highlight .hljs-selector-id,
-.cssw-editor-highlight .hljs-selector-pseudo { color: var(--tt-accent); }
-.cssw-editor-highlight .hljs-number,
-.cssw-editor-highlight .hljs-string,
-.cssw-editor-highlight .hljs-built_in { color: #4a8; }
-.cssw-editor-highlight .hljs-comment { color: var(--tt-text-tertiary); font-style: italic; }
-.cssw-editor-highlight .hljs-meta,
-.cssw-editor-highlight .hljs-keyword { color: #a67; }
 
 /* 定位提示条"没找到"警告态 */
 .cssw-editor-tip-warn {
@@ -619,6 +590,20 @@
   background: var(--tt-bg-solid);
 }
 .cssw-footer[hidden] { display: none; }
+.cssw-edit-btn {
+  flex: 1;
+  min-height: 44px;
+  background: transparent;
+  color: var(--tt-accent);
+  border: 1px solid var(--tt-accent);
+  border-radius: var(--tt-radius-btn);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.cssw-edit-btn:hover { background: rgba(217, 119, 87, 0.08); }
 .cssw-gen-btn {
   flex: 1;
   min-height: 44px;
@@ -626,7 +611,7 @@
   color: #fff;
   border: 1px solid var(--tt-accent);
   border-radius: var(--tt-radius-btn);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
