@@ -43,6 +43,9 @@ let currentTarget = null;
 let userText = '';        // 用户一句话诉求（自由输入）
 let lastAnalysis = null;  // 当前元素现状 { computed, pseudo }
 let lastSelector = '';    // 当前元素精确选择器
+let ruleList = [];        // 当前元素的"相关规则"列表
+let ruleIdx = 0;          // 当前展示的规则段索引
+let currentTab = '';      // 'locate' | 'prompt'
 
 /* ============ 皮肤 ============ */
 function getSkinClass() { return currentSkin === 'claude' ? SKIN_CLAUDE : SKIN_FROSTED; }
@@ -331,21 +334,18 @@ function onElementPicked(el) {
   containerChain = getContainerChain(el);
   chainIndex = 0;
   userText = '';
-  hideStep('.cssw-step-result');
   const empty = panelEl.querySelector('.cssw-empty'); if (empty) empty.hidden = true;
   expandPanel();
-  renderArea();       // 极简一屏：区域名 + 选择器(可复制) + 有无对应代码 + 诉求框 + 层级链
-  showFooter();
+  renderArea();
 }
 
 
-/* ============ 区域：区域名 + 精确选择器(可复制) + 现状 + 层级链 + 诉求输入 ============ */
+/* ============ 区域 + 两Tab位(定位/提示词) ============ */
 function renderArea() {
   const el = containerChain[chainIndex] || currentTarget;
   const info = identify(el);
   const step = panelEl.querySelector('.cssw-step-area');
 
-  // 现状 + 选择器（供展示 + 生成提问复用）
   try { lastAnalysis = analyze(el); } catch (_) { lastAnalysis = { computed: {}, pseudo: [] }; }
   lastSelector = buildUniqueSelector(el);
 
@@ -357,73 +357,55 @@ function renderArea() {
       const title = ci.note ? ` title="${escapeHtml(ci.note)}"` : '';
       return `<button type="button" class="cssw-crumb${active}" data-idx="${i}"${title}>${escapeHtml(ci.name)}</button>`;
     }).join('<span class="cssw-crumb-sep">›</span>');
-    chainHtml = `<div class="cssw-chain"><span class="cssw-chain-tip">层级：</span><div class="cssw-chain-crumbs">${crumbs}</div></div>`;
+    chainHtml = `<div class="cssw-chain"><div class="cssw-chain-crumbs">${crumbs}</div></div>`;
   }
 
-  const noteHtml = info.note ? `<div class="cssw-area-note">${escapeHtml(info.note)}</div>` : '';
   const selHtml = lastSelector
-    ? `<div class="cssw-sel-row"><code class="cssw-sel-code">${escapeHtml(lastSelector)}</code><button type="button" class="cssw-sel-copy" title="复制选择器">📋</button></div>`
+    ? `<span class="cssw-sel-tag">${escapeHtml(lastSelector)} <button type="button" class="cssw-sel-copy-inline" title="复制选择器">📋</button></span>`
     : '';
 
-  // 从 customCSS 全文里挖出"含这个元素"的相关规则原文，直接显示 + 给搜索词。
-  // 默认只显前 2 段，其余折叠进 <details>，整区限高滚动，绝不挤走底部按钮。
-  const rules = findRelatedRules(el);
-  let codeHtml;
-  if (rules.length) {
-    const renderRule = (r) => `<div class="cssw-rule">`
-      + `<pre class="cssw-rule-code">${escapeHtml(r.text)}</pre>`
-      + `<div class="cssw-rule-find"><span>搜这段定位：</span><code>${escapeHtml(r.needle)}</code><button type="button" class="cssw-rule-copy" data-needle="${escapeHtml(r.needle)}" title="复制搜索词">📋</button></div>`
-      + `</div>`;
-    const head = rules.slice(0, 2).map(renderRule).join('');
-    const rest = rules.slice(2);
-    const restHtml = rest.length
-      ? `<details class="cssw-rules-more"><summary>还有 ${rest.length} 段，展开看</summary>${rest.map(renderRule).join('')}</details>`
-      : '';
-    codeHtml = `<div class="cssw-rules"><div class="cssw-rules-title">📄 自定义CSS里和这里相关的代码（${rules.length} 段）：</div>${head}${restHtml}</div>`;
-  } else {
-    codeHtml = `<div class="cssw-has cssw-has-no">⚠️ 自定义CSS里还没写这里，需新加一条（点下面生成提问让 AI 帮你写）</div>`;
-  }
+  // 相关规则（按匹配度排序，最匹配在前）。单段显示 + 翻页。
+  ruleList = findRelatedRules(el);
+  ruleIdx = 0;
+  const rulesHtml = ruleList.length
+    ? `<div class="cssw-rules"><div class="cssw-rules-head">
+         <span>相关代码
+           <span class="cssw-rule-count">1/${ruleList.length}</span>
+           <button type="button" class="cssw-rule-nav" data-dir="-1"${ruleList.length>1?'':' hidden'}>‹</button>
+           <button type="button" class="cssw-rule-nav" data-dir="1"${ruleList.length>1?'':' hidden'}>›</button></span>
+       </div><div class="cssw-rule-slot"></div></div>`
+    : `<div class="cssw-has cssw-has-no">⚠️ 还没在自定义CSS里写这里</div>`;
 
-  // 现状摘要（最多列几条常用的，避免太长）
-  const comp = lastAnalysis && lastAnalysis.computed ? lastAnalysis.computed : {};
-  const compKeys = Object.keys(comp).slice(0, 6);
-  const compHtml = compKeys.length
-    ? `<div class="cssw-now"><div class="cssw-now-title">它现在的样子：</div>${compKeys.map((k) => `<div class="cssw-now-item"><span>${escapeHtml(k)}</span><span>${escapeHtml(comp[k])}</span></div>`).join('')}</div>`
-    : '';
-
+  currentTab = 'locate';
   step.innerHTML = `
-    <div class="cssw-card cssw-area-card">
-      <div class="cssw-area-label">正在改</div>
-      <div class="cssw-area-name">${escapeHtml(info.name)}</div>
-      ${noteHtml}
+    <div class="cssw-topbar">
+      <span class="cssw-topbar-name">${escapeHtml(info.name)}</span>
       ${selHtml}
-      ${codeHtml}
       ${chainHtml}
+      <div class="cssw-tabs">
+        <button type="button" class="cssw-tab active" data-tab="locate">🎯 定位</button>
+        <button type="button" class="cssw-tab" data-tab="prompt">💬 提示词</button>
+      </div>
     </div>
-    ${compHtml}
-    <div class="cssw-card">
-      <label class="cssw-q" for="cssw-usertext">你想把它改成什么样？（一句话，可留空）</label>
-      <textarea id="cssw-usertext" class="cssw-usertext" rows="2" placeholder="例如：字大一点、背景透明些、加个圆角">${escapeHtml(userText)}</textarea>
+    <div class="cssw-tab-panel" data-tab="locate">
+      ${rulesHtml}
+      <label class="cssw-q" for="cssw-usertext">怎么改？（一句话）</label>
+      <textarea id="cssw-usertext" class="cssw-usertext" rows="2" placeholder="例如：字大点、背景透明、加个圆角">${escapeHtml(userText)}</textarea>
+      <button type="button" class="cssw-gen-btn cssw-gen-inline">生成提问问 AI</button>
     </div>
+    <div class="cssw-tab-panel cssw-tab-prompt" data-tab="prompt" hidden></div>
   `;
   step.hidden = false;
 
-  // 持续高亮当前选中的元素
   showPersistentHighlight(el);
 
-  // 面包屑重建后横向滚动条归零 → 选中项拉回可视区
-  const activeCrumb = step.querySelector('.cssw-crumb.active');
-  if (activeCrumb && activeCrumb.scrollIntoView) {
-    try { activeCrumb.scrollIntoView({ inline: 'nearest', block: 'nearest' }); } catch (_) {}
-  }
+  if (ruleList.length) renderRuleSlot();
 
-  const selCopy = step.querySelector('.cssw-sel-copy');
+  // 选择器复制
+  const selCopy = step.querySelector('.cssw-sel-copy-inline');
   if (selCopy) selCopy.addEventListener('click', () => copyText(lastSelector, selCopy));
 
-  step.querySelectorAll('.cssw-rule-copy').forEach((btn) => {
-    btn.addEventListener('click', () => copyText(btn.getAttribute('data-needle') || '', btn));
-  });
-
+  // 诉求输入
   const ut = step.querySelector('.cssw-usertext');
   if (ut) {
     ut.addEventListener('input', () => { userText = ut.value; });
@@ -431,6 +413,30 @@ function renderArea() {
     ut.addEventListener('pointerdown', (e) => e.stopPropagation());
   }
 
+  // 生成按钮(定位tab内)
+  step.querySelector('.cssw-gen-inline')?.addEventListener('click', onGenerate);
+
+  // tab 切换
+  step.querySelectorAll('.cssw-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const want = btn.getAttribute('data-tab');
+      step.querySelectorAll('.cssw-tab').forEach(b => b.classList.toggle('active', b===btn));
+      step.querySelectorAll('.cssw-tab-panel').forEach(p => p.hidden = p.getAttribute('data-tab')!==want);
+      currentTab = want;
+    });
+  });
+  showTab('locate');
+
+  // 规则翻页
+  step.querySelectorAll('.cssw-rule-nav').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const dir = parseInt(btn.getAttribute('data-dir'), 10) || 1;
+      ruleIdx = (ruleIdx + dir + ruleList.length) % ruleList.length;
+      renderRuleSlot();
+    });
+  });
+
+  // 层级面包屑
   step.querySelectorAll('.cssw-crumb').forEach((btn) => {
     btn.addEventListener('click', () => {
       chainIndex = parseInt(btn.getAttribute('data-idx'), 10) || 0;
@@ -439,12 +445,68 @@ function renderArea() {
   });
 }
 
+// 切换 tab：切换到提示词时自动触发 renderResult
+function showTab(name) {
+  const step = panelEl?.querySelector('.cssw-step-area');
+  if (!step) return;
+  step.querySelectorAll('.cssw-tab').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab')===name));
+  step.querySelectorAll('.cssw-tab-panel').forEach(p => p.hidden = p.getAttribute('data-tab')!==name);
+  currentTab = name;
+  if (name === 'prompt') {
+    const resultPanel = step.querySelector('[data-tab="prompt"]');
+    if (resultPanel && !resultPanel.innerHTML) onGenerateInto(name);
+  }
+}
+
+// 提示词 tab 的结果区（复用 renderResult，但注到 tab panel 里而非独立 step）
+function onGenerateInto(tab) {
+  const el = containerChain[chainIndex] || currentTarget;
+  if (!el) return;
+  const info = identify(el);
+  if (!lastAnalysis) { try { lastAnalysis = analyze(el); } catch (_) { lastAnalysis = { computed: {}, pseudo: [] }; } }
+  if (!lastSelector) lastSelector = buildUniqueSelector(el);
+  const text = buildPrompt({
+    areaName: info.name,
+    areaAiName: info.aiName || info.name,
+    selector: lastSelector,
+    computed: lastAnalysis.computed,
+    pseudo: lastAnalysis.pseudo,
+    userText,
+    customCss: safeReadNativeCSS(),
+  });
+  const panel = panelEl.querySelector('.cssw-tab-prompt');
+  if (panel) {
+    panel.innerHTML = `
+      <textarea class="cssw-result-text" readonly>${escapeHtml(text)}</textarea>
+      <button type="button" class="cssw-copy-btn">📋 一键复制</button>
+      <button type="button" class="cssw-restart-btn">🔄 全部清空，重新开始</button>
+    `;
+    const copyBtn = panel.querySelector('.cssw-copy-btn');
+    copyBtn.addEventListener('click', () => copyText(text, copyBtn));
+    panel.querySelector('.cssw-restart-btn').addEventListener('click', restartAll);
+  }
+}
+
+// 渲染"相关规则"区的当前段（单段）
+function renderRuleSlot() {
+  const slot = panelEl?.querySelector('.cssw-rule-slot');
+  if (!slot || !ruleList.length) return;
+  const r = ruleList[ruleIdx] || ruleList[0];
+  slot.innerHTML = `<pre class="cssw-rule-code">${escapeHtml(r.text)}</pre>`
+    + `<div class="cssw-rule-find"><span>搜这段：</span><code>${escapeHtml(r.needle)}</code><button type="button" class="cssw-rule-copy" title="复制搜索词">📋</button></div>`;
+  const copyBtn = slot.querySelector('.cssw-rule-copy');
+  if (copyBtn) copyBtn.addEventListener('click', () => copyText(r.needle, copyBtn));
+  // 刷新计数显示
+  const cnt = panelEl.querySelector('.cssw-rule-count');
+  if (cnt) cnt.textContent = `${ruleIdx + 1}/${ruleList.length}`;
+}
+
 /* ============ 当前选中元素持续高亮 ============ */
 let persistHlEl = null;
 let persistTarget = null;
 let persistRaf = null;
-
 let persistScheduled = false;
+
 function showPersistentHighlight(el) {
   persistTarget = el;
   if (!persistHlEl) {
@@ -453,7 +515,6 @@ function showPersistentHighlight(el) {
     document.body.appendChild(persistHlEl);
   }
   positionPersist();
-  // #4 卡顿修复：不再每帧 rAF 死循环读 rect；只在滚动/缩放时按需重定位（rAF 节流一次）
   window.addEventListener('scroll', onPersistReflow, true);
   window.addEventListener('resize', onPersistReflow, true);
 }
@@ -552,9 +613,20 @@ function extractRules(css, anchors) {
     const full = `${selector} { ${body} }`;
     if (seen.has(full)) continue;
     seen.add(full);
-    out.push({ text: shorten(full, 400), needle: deriveNeedle(selector, body, hit) });
+    // 匹配度打分：锚点越靠选择器末尾、选择器越短 → 越"专属" → 分越高
+    const score = anchorScore(selector, hit);
+    out.push({ text: shorten(full, 400), needle: deriveNeedle(selector, body, hit), score });
   }
+  out.sort((a, b) => b.score - a.score);
   return out;
+}
+// 锚点在选择器里的位置分：越靠末尾分越高；带伪元素的加分；选择器短加分
+function anchorScore(selector, anchor) {
+  const idx = selector.lastIndexOf(anchor);
+  let score = selector.length - idx;          // 越靠后分越高
+  if (/::?(before|after)/.test(selector)) score += 50;  // 伪元素精准
+  if (selector.length < 40) score += 20;     // 短选择器更专一
+  return score;
 }
 
 // 选择器里是否把锚点当作完整 token 出现（前后是边界符，不是别的类名的一部分）
